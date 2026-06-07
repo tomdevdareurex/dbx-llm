@@ -26,12 +26,14 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from dbx_llm import chat, list_models, list_prompts, load_prompt
+from dbx_llm.client import context_limit, new_stats
 from dbx_llm.repo_tools import (
     MEMORY_FILENAME,
     SCAN_TASK,
@@ -223,6 +225,46 @@ def _chat_system(prompt_name: str) -> dict:
     return {"role": "system", "content": content}
 
 
+def _fmt_int(n: int) -> str:
+    return f"{n:,}"
+
+
+def _render_stats(stats: dict, model: str) -> None:
+    """Render the context-window meter + a session-stats expander in the sidebar."""
+    if not stats or not stats.get("turns"):
+        return
+
+    used = stats.get("last_prompt_tokens", 0)
+    limit = context_limit(model)
+
+    st.sidebar.markdown("---")
+    if limit:
+        pct = min(used / limit, 1.0)
+        st.sidebar.progress(pct, text=f"Context {pct:.0%}")
+        st.sidebar.caption(f"🧮 {_fmt_int(used)} / {_fmt_int(limit)} tokens in context")
+    else:
+        st.sidebar.caption(f"🧮 {_fmt_int(used)} tokens in context (limit unknown)")
+
+    with st.sidebar.expander("📊 Session stats"):
+        st.metric("Last latency", f"{stats.get('last_latency', 0.0):.1f}s")
+        tot_tok = stats.get("total_tokens", 0)
+        st.caption(
+            f"Turns: **{stats.get('turns', 0)}**  ·  "
+            f"Total tokens: **{_fmt_int(tot_tok)}**\n\n"
+            f"Prompt: {_fmt_int(stats.get('prompt_tokens', 0))}  ·  "
+            f"Completion: {_fmt_int(stats.get('completion_tokens', 0))}"
+        )
+        last_lat = stats.get("last_latency", 0.0)
+        last_out = stats.get("last_completion_tokens", 0)
+        if last_lat > 0 and last_out:
+            st.caption(f"Last speed: **{last_out / last_lat:.0f}** tok/s")
+        tool_calls = stats.get("tool_calls") or {}
+        if tool_calls:
+            breakdown = "  ·  ".join(f"{k}: {v}" for k, v in sorted(tool_calls.items()))
+            total_calls = sum(tool_calls.values())
+            st.caption(f"🔧 Tool calls ({total_calls}): {breakdown}")
+
+
 # --- Sidebar ---------------------------------------------------------------
 st.sidebar.title("dbx-llm")
 
@@ -255,13 +297,16 @@ def render_chat() -> None:
 
     if st.sidebar.button("Clear chat", use_container_width=True):
         st.session_state.pop("chat_view", None)
+        st.session_state.pop("chat_stats", None)
         st.rerun()
 
     # Reset when the prompt changes so the new system prompt applies.
     if st.session_state.get("chat_prompt") != prompt_name:
         st.session_state["chat_view"] = []
+        st.session_state["chat_stats"] = new_stats()
         st.session_state["chat_prompt"] = prompt_name
     st.session_state.setdefault("chat_view", [])
+    st.session_state.setdefault("chat_stats", new_stats())
 
     st.title(CHAT)
     st.caption(f"Prompt: **{prompt_name}** — {_describe_prompt(prompt_name)}")
@@ -277,12 +322,31 @@ def render_chat() -> None:
         api_messages = [_chat_system(prompt_name)] + st.session_state["chat_view"]
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
+                usage: dict = {}
+                start = time.perf_counter()
                 try:
-                    reply = chat(model, api_messages)
+                    reply = chat(model, api_messages, usage=usage)
                 except Exception as exc:
                     reply = f"⚠️ Error talking to `{model}`: {exc}"
+                    usage = {}
+                elapsed = time.perf_counter() - start
             st.markdown(reply)
+            if usage:
+                stats = st.session_state["chat_stats"]
+                stats["turns"] += 1
+                stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                stats["completion_tokens"] += usage.get("completion_tokens", 0)
+                stats["total_tokens"] += usage.get("total_tokens", 0)
+                stats["last_prompt_tokens"] = usage.get("prompt_tokens", 0)
+                stats["last_completion_tokens"] = usage.get("completion_tokens", 0)
+                stats["last_latency"] = elapsed
+                stats["total_latency"] += elapsed
+                out = usage.get("completion_tokens", 0)
+                speed = f" · {out / elapsed:.0f} tok/s" if elapsed > 0 and out else ""
+                st.caption(f"⏱ {elapsed:.1f}s · {_fmt_int(out)} tok{speed}")
         st.session_state["chat_view"].append({"role": "assistant", "content": reply})
+
+    _render_stats(st.session_state["chat_stats"], model)
 
 
 # ===========================================================================
@@ -293,7 +357,7 @@ def render_qa() -> None:
     st.sidebar.caption(f"📁 {root}")
     st.sidebar.caption(_describe_prompt("repo_expert"))
     if st.sidebar.button("Clear chat", use_container_width=True):
-        for key in ("qa_view", "qa_msgs", "qa_sig"):
+        for key in ("qa_view", "qa_msgs", "qa_sig", "qa_stats"):
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -306,6 +370,8 @@ def render_qa() -> None:
             {"role": "system", "content": build_repo_system_prompt(root, writable=False)}
         ]
         st.session_state["qa_view"] = []
+        st.session_state["qa_stats"] = new_stats()
+    st.session_state.setdefault("qa_stats", new_stats())
 
     st.title(QA)
     st.caption(f"Read-only codebase expert over **{root}**")
@@ -320,15 +386,29 @@ def render_qa() -> None:
             st.markdown(user_input)
         st.session_state["qa_msgs"].append({"role": "user", "content": user_input})
         with st.chat_message("assistant"):
+            stats = st.session_state["qa_stats"]
             with st.spinner("Exploring the repo…"):
+                start = time.perf_counter()
+                calls_before = sum((stats.get("tool_calls") or {}).values())
                 try:
                     reply = run_with_tools(
-                        model, st.session_state["qa_msgs"], functions, schemas
+                        model, st.session_state["qa_msgs"], functions, schemas,
+                        stats=stats,
                     )
                 except Exception as exc:
                     reply = f"⚠️ Error: {exc}"
+                elapsed = time.perf_counter() - start
             st.markdown(reply)
+            stats["last_latency"] = elapsed
+            stats["total_latency"] += elapsed
+            new_calls = sum((stats.get("tool_calls") or {}).values()) - calls_before
+            st.caption(
+                f"⏱ {elapsed:.1f}s · {new_calls} tool call(s) · "
+                f"{_fmt_int(stats.get('last_prompt_tokens', 0))} tok in context"
+            )
         st.session_state["qa_view"].append({"role": "assistant", "content": reply})
+
+    _render_stats(st.session_state["qa_stats"], model)
 
 
 # ===========================================================================
@@ -342,7 +422,7 @@ def render_write() -> None:
     )
     st.sidebar.caption(f"📁 {root}")
     if st.sidebar.button("Clear chat", use_container_width=True):
-        for key in ("w_view", "w_msgs", "w_queue", "w_pending", "w_sig", "w_go", "w_decision"):
+        for key in ("w_view", "w_msgs", "w_queue", "w_pending", "w_sig", "w_go", "w_decision", "w_stats"):
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -363,8 +443,10 @@ def render_write() -> None:
         st.session_state["w_view"] = []
         st.session_state["w_queue"] = []
         st.session_state["w_pending"] = None
+        st.session_state["w_stats"] = new_stats()
         st.session_state.pop("w_go", None)
         st.session_state.pop("w_decision", None)
+    st.session_state.setdefault("w_stats", new_stats())
 
     def _append_tool(call_id: str, content: str) -> None:
         st.session_state["w_msgs"].append(
@@ -378,12 +460,25 @@ def render_write() -> None:
         while True:
             # Need a new model turn?
             if not queue and st.session_state["w_pending"] is None:
-                message = chat(model, msgs, tools=schemas)
+                usage: dict = {}
+                message = chat(model, msgs, tools=schemas, usage=usage)
+                stats = st.session_state["w_stats"]
+                if usage:
+                    stats["turns"] += 1
+                    stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                    stats["completion_tokens"] += usage.get("completion_tokens", 0)
+                    stats["total_tokens"] += usage.get("total_tokens", 0)
+                    stats["last_prompt_tokens"] = usage.get("prompt_tokens", 0)
+                    stats["last_completion_tokens"] = usage.get("completion_tokens", 0)
                 if not getattr(message, "tool_calls", None):
                     text = message.content or ""
                     msgs.append({"role": "assistant", "content": text})
                     st.session_state["w_view"].append({"role": "assistant", "content": text})
                     return
+                for c in message.tool_calls:
+                    stats["tool_calls"][c.function.name] = (
+                        stats["tool_calls"].get(c.function.name, 0) + 1
+                    )
                 msgs.append(message.model_dump(exclude_none=True))
                 queue[:] = [
                     {"id": c.id, "name": c.function.name,
@@ -415,6 +510,7 @@ def render_write() -> None:
     st.title(WRITE)
     mode_note = "self-edit ON" if allow_self_edit else "own source protected"
     st.caption(f"Editing **{root}** with approval — {mode_note}")
+    _render_stats(st.session_state["w_stats"], model)
 
     # Render history.
     for msg in st.session_state["w_view"]:
@@ -494,14 +590,24 @@ def render_scan() -> None:
             {"role": "system", "content": build_repo_system_prompt(root, writable=False)},
             {"role": "user", "content": SCAN_TASK},
         ]
+        stats = new_stats()
         with st.spinner("Scanning the repo… this can take a minute."):
+            start = time.perf_counter()
             try:
-                summary = run_with_tools(model, messages, functions, schemas, max_turns=40)
+                summary = run_with_tools(model, messages, functions, schemas, max_turns=40, stats=stats)
             except Exception as exc:
                 summary = f"⚠️ Error: {exc}"
+            stats["last_latency"] = time.perf_counter() - start
         st.session_state["scan_summary"] = summary
+        total_calls = sum((stats.get("tool_calls") or {}).values())
+        st.session_state["scan_stats_line"] = (
+            f"⏱ {stats['last_latency']:.1f}s · {stats['turns']} turns · "
+            f"{total_calls} tool call(s) · {_fmt_int(stats['total_tokens'])} tokens"
+        )
 
     if st.session_state.get("scan_summary"):
+        if st.session_state.get("scan_stats_line"):
+            st.caption(st.session_state["scan_stats_line"])
         st.subheader("Summary")
         st.markdown(st.session_state["scan_summary"])
 

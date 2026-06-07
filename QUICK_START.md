@@ -112,6 +112,9 @@ So `--scan` wins over `--repo`, and `--repo` wins over plain chat.
 
 ## The three modes you actually run
 
+> After each reply the CLI prints a stats line — latency, completion tokens,
+> tok/s, context-window usage, and (in repo/scan modes) tool-call count.
+
 ### 1. Plain chat (no repo)
 ```powershell
 # just talk to the model

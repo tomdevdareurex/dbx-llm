@@ -5,12 +5,20 @@ import importlib.util
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from dbx_llm.client import chat, list_models
+from dbx_llm.client import chat, format_stats, list_models, new_stats
 from dbx_llm.prompts import list_prompts, load_prompt
+
+
+def _print_stats(stats: dict, model: str) -> None:
+    """Print the shared one-line stats summary (latency, tokens, context, tools)."""
+    line = format_stats(stats, model)
+    if line:
+        print(f"  {line}\n")
 
 def _expand_attachments(text: str) -> str:
     """Inline the contents of any ``@<path>`` tokens found in the message.
@@ -35,6 +43,7 @@ def _expand_attachments(text: str) -> str:
 def _plain_chat_repl(model: str, system: str, prompt_name: str) -> None:
     """Plain chat: relay user messages to the model (no tools)."""
     history: list[dict] = [{"role": "system", "content": system}]
+    stats = new_stats()
     print(f"Model:  {model}")
     print(f"Prompt: {prompt_name}")
     print("Type your message. Attach a file with @path. Ctrl-C to exit.\n")
@@ -47,9 +56,22 @@ def _plain_chat_repl(model: str, system: str, prompt_name: str) -> None:
         if not user:
             continue
         history.append({"role": "user", "content": _expand_attachments(user)})
-        reply = chat(model, history)
+        usage: dict = {}
+        start = time.perf_counter()
+        reply = chat(model, history, usage=usage)
+        elapsed = time.perf_counter() - start
         history.append({"role": "assistant", "content": reply})
         print(f"\n{reply}\n")
+        if usage:
+            stats["turns"] += 1
+            stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            stats["completion_tokens"] += usage.get("completion_tokens", 0)
+            stats["total_tokens"] += usage.get("total_tokens", 0)
+            stats["last_prompt_tokens"] = usage.get("prompt_tokens", 0)
+            stats["last_completion_tokens"] = usage.get("completion_tokens", 0)
+            stats["last_latency"] = elapsed
+            stats["total_latency"] += elapsed
+        _print_stats(stats, model)
 
 
 def _repo_agent_repl(
@@ -70,6 +92,7 @@ def _repo_agent_repl(
     )
 
     history: list[dict] = [{"role": "system", "content": system}]
+    stats = new_stats()
     mode = "read/write" if allow_write else "read-only"
     print(f"Model:  {model}")
     print(f"Repo:   {root}  (codebase-expert agent, {mode})")
@@ -83,9 +106,12 @@ def _repo_agent_repl(
         if not user:
             continue
         history.append({"role": "user", "content": _expand_attachments(user)})
-        reply = run_with_tools(model, history, functions, schemas)
+        start = time.perf_counter()
+        reply = run_with_tools(model, history, functions, schemas, stats=stats)
+        stats["last_latency"] = time.perf_counter() - start
         history.append({"role": "assistant", "content": reply})
         print(f"\n{reply}\n")
+        _print_stats(stats, model)
 
 
 def _repo_scan(model: str, root: Path) -> None:
@@ -107,8 +133,12 @@ def _repo_scan(model: str, root: Path) -> None:
         {"role": "system", "content": system},
         {"role": "user", "content": SCAN_TASK},
     ]
-    summary = run_with_tools(model, messages, functions, schemas, max_turns=40)
+    stats = new_stats()
+    start = time.perf_counter()
+    summary = run_with_tools(model, messages, functions, schemas, max_turns=40, stats=stats)
+    stats["last_latency"] = time.perf_counter() - start
     print(f"\n{summary}\n")
+    _print_stats(stats, model)
 
 
 def _port_in_use(port: int) -> bool:

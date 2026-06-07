@@ -176,6 +176,10 @@ python -m dbx_llm --prompt coder --model databricks-meta-llama-3-3-70b-instruct
 Inside the REPL, type a message and press Enter. Conversation history is kept
 for the session. Press `Ctrl-C` to exit.
 
+After each reply the CLI prints a short stats line — last-turn latency,
+completion tokens, throughput (tok/s), context-window usage, and (in `--repo` /
+`--scan` modes) the number of tool calls — the same numbers the GUI shows.
+
 **Change behavior by editing prompts** — edit the bundled
 `dbx_llm/_bundled_prompts/default.md` (changes are live with an editable `-e .`
 install), or drop a `*.md` into a local `prompts/` folder (or set

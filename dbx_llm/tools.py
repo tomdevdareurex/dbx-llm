@@ -16,6 +16,7 @@ def run_with_tools(
     tool_schemas: list[dict],
     *,
     max_turns: int = 12,
+    stats: dict | None = None,
 ) -> str:
     """Run a tool-calling loop using local Python functions.
 
@@ -25,14 +26,34 @@ def run_with_tools(
         functions: Map of tool name -> callable(**kwargs).
         tool_schemas: OpenAI tool definitions describing those functions.
         max_turns: Safety cap on tool-calling iterations.
+        stats: Optional dict accumulated across the loop with usage metrics:
+            ``turns`` (model calls), ``prompt_tokens`` / ``completion_tokens`` /
+            ``total_tokens`` (summed), ``last_prompt_tokens`` (current context
+            fill), and ``tool_calls`` (a name -> count map).
 
     Returns:
         The model's final text answer, or a notice if the turn cap is reached.
     """
     from dbx_llm.client import chat
 
+    if stats is not None:
+        stats.setdefault("turns", 0)
+        stats.setdefault("prompt_tokens", 0)
+        stats.setdefault("completion_tokens", 0)
+        stats.setdefault("total_tokens", 0)
+        stats.setdefault("last_prompt_tokens", 0)
+        stats.setdefault("tool_calls", {})
+
     for _ in range(max_turns):
-        message = chat(model, messages, tools=tool_schemas)
+        usage: dict = {}
+        message = chat(model, messages, tools=tool_schemas, usage=usage)
+
+        if stats is not None and usage:
+            stats["turns"] += 1
+            stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            stats["completion_tokens"] += usage.get("completion_tokens", 0)
+            stats["total_tokens"] += usage.get("total_tokens", 0)
+            stats["last_prompt_tokens"] = usage.get("prompt_tokens", 0)
 
         tool_calls = getattr(message, "tool_calls", None)
         if not tool_calls:
@@ -41,6 +62,8 @@ def run_with_tools(
         messages.append(message.model_dump(exclude_none=True))
         for call in tool_calls:
             name = call.function.name
+            if stats is not None:
+                stats["tool_calls"][name] = stats["tool_calls"].get(name, 0) + 1
             try:
                 func = functions[name]
             except KeyError:
