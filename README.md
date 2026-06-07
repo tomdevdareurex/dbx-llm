@@ -27,8 +27,10 @@ from the Databricks CLI / `~/.databrickscfg` — **no tokens in code**.
 
 ```
 dbx-llm/
-├── pyproject.toml        # package metadata + the `dbx-llm` command
+├── pyproject.toml        # package metadata, the `dbx-llm` command, [ui] extra
 ├── README.md
+├── quick_start_help.md   # condensed cheat-sheet for running it
+├── app.py                # Streamlit GUI (mirrors every CLI mode in the browser)
 ├── .gitignore            # ignores .env, caches, build artifacts
 ├── .env.example          # template you copy to .env
 ├── .env                  # your local auth config (gitignored)
@@ -37,10 +39,12 @@ dbx-llm/
 │   └── coder.md
 └── dbx_llm/
     ├── __init__.py       # public API: chat, list_models, load_prompt, ...
+    ├── __main__.py       # enables `python -m dbx_llm`
     ├── client.py         # auth + OpenAI client + list_models + chat   (core)
     ├── prompts.py        # load_prompt / list_prompts
     ├── cli.py            # interactive REPL (the `dbx-llm` command)
-    └── tools.py          # OPTIONAL function/tool calling (not used by core)
+    ├── tools.py          # OPTIONAL function/tool-calling loop (not used by core)
+    └── repo_tools.py     # sandboxed repo tools + shared repo system prompt
 ```
 
 ---
@@ -82,6 +86,43 @@ Copy the env template (it's already filled with the default profile):
 ```bash
 cp .env.example .env   # already present in this repo
 ```
+
+### Install into another repo (or another machine)
+
+`dbx-llm` is a normal installable package, so you can add it to a *different*
+project's environment. Two ways:
+
+**From this local folder** (best while developing — edits here are picked up live,
+no push or auth needed):
+
+```powershell
+# editable link to this folder, with the Streamlit GUI extra
+python -m pip install -e "C:\Users\wn686\OneDrive - Deutsche Börse AG\Desktop\REPOs\dbx-llm[ui]"
+```
+
+**From git** (best for another machine or a pinned version — requires the code to
+be pushed first; this clones from GitHub rather than your disk):
+
+```powershell
+# latest pushed master
+python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git"
+
+# with the Streamlit GUI extra
+python -m pip install "dbx-llm[ui] @ git+https://github.com/tomdevdareurex/dbx-llm.git"
+
+# pin to a branch / tag / commit
+python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git@master"
+```
+
+> A git install fetches only what's **pushed**. Run `git push` first so your
+> latest changes are included. If the GitHub repo is **private**, pip needs
+> credentials — use a token (`git+https://<TOKEN>@github.com/...`) or SSH
+> (`git+ssh://git@github.com/...`).
+>
+> Heads-up: the bundled `prompts/` folder is **not** packaged, so in another repo
+> plain chat (`--prompt default`) needs either a local `prompts/` folder or
+> `DBX_LLM_PROMPT_DIR` pointing back here. The `--repo` agent works without it
+> (it falls back to a built-in prompt).
 
 ---
 

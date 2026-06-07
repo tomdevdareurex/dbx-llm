@@ -14,6 +14,43 @@ from dbx_llm.client import _workspace
 ep = _workspace().serving_endpoints.get("databricks-claude-opus-4-6")
 print(ep)
 
+# Install
+
+## In this repo (development)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -e .          # core
+python -m pip install -e ".[ui]"    # + Streamlit GUI
+```
+
+## Into another repo / another machine
+
+```powershell
+# A) from this local folder, editable + GUI extra (edits here picked up live)
+python -m pip install -e "C:\Users\wn686\OneDrive - Deutsche Börse AG\Desktop\REPOs\dbx-llm[ui]"
+
+# B) from git — latest pushed master
+python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git"
+
+# B) from git — with the Streamlit GUI extra
+python -m pip install "dbx-llm[ui] @ git+https://github.com/tomdevdareurex/dbx-llm.git"
+
+# B) from git — pin to a branch / tag / commit
+python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git@master"
+```
+
+Notes:
+- A git install fetches only what's **pushed** — run `git push` first. If the
+  GitHub repo is private, add a token (`git+https://<TOKEN>@github.com/...`) or
+  use SSH (`git+ssh://git@github.com/...`).
+- The bundled `prompts/` folder isn't packaged. In another repo, `--repo` works
+  (built-in fallback prompt) but plain chat `--prompt default` needs a local
+  `prompts/` folder or `DBX_LLM_PROMPT_DIR` pointing back here.
+- Always run as `python -m dbx_llm ...` (the `dbx-llm.exe` launcher is blocked by
+  corporate group policy).
+
 # Options to run
 
 ## The flags (what the parser understands)
