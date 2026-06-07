@@ -52,10 +52,11 @@ def chat(
         The assistant message string for plain chat, or the full OpenAI message
         object (so the caller can inspect ``tool_calls``) when ``tools`` is set.
     """
+    if tools is not None:
+        kwargs["tools"] = tools
     response = get_client().chat.completions.create(
         model=model,
         messages=messages,
-        tools=tools,
         **kwargs,
     )
     message = response.choices[0].message

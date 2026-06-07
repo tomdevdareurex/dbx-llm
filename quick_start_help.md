@@ -1,0 +1,168 @@
+
+# 2. Confirm Databricks auth works
+databricks current-user me
+
+# 3. See available models
+.\.venv\Scripts\python.exe -m dbx_llm --list-models
+
+# 4. Start chatting
+.\.venv\Scripts\python.exe -m dbx_llm --model databricks-claude-opus-4-6
+
+
+# Check context window
+from dbx_llm.client import _workspace
+ep = _workspace().serving_endpoints.get("databricks-claude-opus-4-6")
+print(ep)
+
+# Options to run
+
+## The flags (what the parser understands)
+
+| Flag | Takes a value? | What it does |
+|------|----------------|--------------|
+| `--model NAME` | yes | Which Databricks serving endpoint to talk to. If omitted, it uses the first one in your list (which may be a dead endpoint), so always pass `--model databricks-claude-opus-4-6`. |
+| `--prompt NAME` | yes | Which system prompt from `prompts/` to load in plain chat. Default is `default`. Only affects plain chat. |
+| `--list-models` | no | Print available endpoints and exit. |
+| `--list-prompts` | no | Print available prompt files and exit. |
+| `--repo [PATH]` | optional | Run as a codebase-expert agent over PATH (defaults to current dir). Without `--write` it is **read-only**. |
+| `--write` | no | Only meaningful with `--repo`. Lets the agent change files — but every change is shown as a diff and applied only after you type `y`. |
+| `--allow-self-edit` | no | Only meaningful with `--write`. Lets the agent edit dbx-llm's *own* source. Off by default so it can't rewrite its own guardrails. |
+| `--scan` | no | One-shot: survey the repo and write findings to `AGENTS.md`, then exit. Pair with `--repo PATH` to target another repo. |
+
+## How the parser decides what to do
+
+It checks in this order and stops at the first match:
+
+1. `--list-models` → print models, exit.
+2. `--list-prompts` → print prompts, exit.
+3. `--scan` → run the one-shot survey, exit.
+4. `--repo` present → start the interactive repo agent.
+5. none of the above → start a plain chat session.
+
+So `--scan` wins over `--repo`, and `--repo` wins over plain chat.
+`--write` and `--allow-self-edit` are *modifiers* — they do nothing on their own.
+
+## The three modes you actually run
+
+### 1. Plain chat (no repo)
+```powershell
+# just talk to the model
+python -m dbx_llm --model databricks-claude-opus-4-6
+
+# pick a different system prompt from prompts/
+python -m dbx_llm --model databricks-claude-opus-4-6 --prompt coder
+```
+
+### 2. Repo agent (read the codebase, answer questions)
+```powershell
+# read-only: it can list/read/search files but NOT change them
+python -m dbx_llm --repo --model databricks-claude-opus-4-6
+
+# point it at a different repo
+python -m dbx_llm --repo C:\path\to\other-repo --model databricks-claude-opus-4-6
+```
+
+### 3. Scan (fill AGENTS.md memory, then exit)
+```powershell
+python -m dbx_llm --scan --model databricks-claude-opus-4-6
+python -m dbx_llm --scan --repo C:\path\to\other-repo --model databricks-claude-opus-4-6
+```
+
+## What "write / edit" actually means (and how to use it)
+
+By default the repo agent is **read-only**: it can look at your code and talk
+about it, but it has no power to change a single file.
+
+Adding `--write` gives it two extra tools — `write_file` (create/overwrite a
+whole file) and `edit_file` (change a snippet inside a file). It does **not**
+edit silently. The flow is always:
+
+1. You ask it to do something ("rename this function", "add a docstring").
+2. It proposes a change and prints a **diff** (red = removed, green = added).
+3. It asks: `Apply this change? [y/N]`.
+4. You type `y` to apply, or anything else (or Enter) to cancel.
+
+```powershell
+# read + write, with your confirmation on every change
+python -m dbx_llm --repo --write --model databricks-claude-opus-4-6
+```
+
+Safety rails that stay on even with `--write`:
+- changes are confined to the repo root (no `..` escapes),
+- it refuses to touch secrets (`.env`) and the `.git/` folder,
+- on the dbx-llm repo itself it refuses to edit its **own** source unless you
+  also add `--allow-self-edit`.
+
+```powershell
+# only needed if you want it to help develop dbx-llm itself
+python -m dbx_llm --repo --write --allow-self-edit --model databricks-claude-opus-4-6
+```
+
+Because your repo is in git, `git diff` / `git checkout .` is your undo button
+if you approve something you didn't mean to.
+
+## Combinations cheat-sheet
+
+| Command | Valid? | Result |
+|---------|--------|--------|
+| `--model X` | ✅ | plain chat |
+| `--repo` | ✅ | read-only agent |
+| `--repo --write` | ✅ | agent that can edit (with confirmation) |
+| `--repo --write --allow-self-edit` | ✅ | also allowed to edit dbx-llm's own code |
+| `--scan` / `--scan --repo PATH` | ✅ | one-shot survey → AGENTS.md |
+| `--write` alone (no `--repo`) | ⚠️ | parses fine but does nothing — plain chat ignores it |
+| `--allow-self-edit` without `--write` | ⚠️ | parses fine but does nothing |
+| `--scan --write` | ⚠️ | `--scan` wins; `--write` is ignored (scan only appends to AGENTS.md) |
+
+## How the AGENTS.md memory works
+
+The repo agent keeps a *living memory* in an `AGENTS.md` file at the repo root.
+
+- **Per repo.** It's always the `AGENTS.md` at the root you point at. In this
+  repo it reads `./AGENTS.md`; with `--repo C:\other` it reads
+  `C:\other\AGENTS.md`. The installed package is never the memory location.
+- **Read once, at startup.** It's baked into the agent's system prompt when the
+  session starts and stays in context for every message that session. It is NOT
+  re-read on each prompt.
+- **Mid-session notes** (via `save_note` or `--scan`) are written to the file
+  immediately, but to fold them into the system prompt you **restart** the
+  session.
+- **Plain chat ignores it.** Only `--repo` and `--scan` use `AGENTS.md`; plain
+  chat uses `prompts/<name>.md` instead.
+- **Commit it** (don't gitignore) so the knowledge travels with the repo.
+
+## GUI option (Streamlit)
+
+The terminal CLI above always works. There's also a Streamlit front-end that
+mirrors **every** CLI mode in your browser, using the same library underneath:
+
+```powershell
+# one-time: install the optional UI dependency
+python -m pip install -e ".[ui]"
+
+# launch the GUI (opens a browser tab)
+.\.venv\Scripts\streamlit.exe run app.py
+# or:
+python -m streamlit run app.py
+```
+
+# Shows options
+python -m  dbx_llm --help
+
+
+Pick a **Mode** in the sidebar — it's the GUI version of the CLI flags:
+
+- 💬 **Chat** = `python -m dbx_llm` — plain chat; pick a system prompt (each shows
+  a short description).
+- 📖 **Repo Q&A (read-only)** = `python -m dbx_llm --repo` — codebase expert that
+  explores the repo before answering.
+- ✏️ **Repo Write (edit with approval)** = `python -m dbx_llm --repo --write` —
+  same agent, but it can edit. Each change appears as a **diff** with **Approve /
+  Reject** buttons (the browser version of the terminal `y/N` prompt). A checkbox
+  turns on `--allow-self-edit`.
+- 🧠 **Scan / set memory** = `python -m dbx_llm --repo --scan` — surveys the repo
+  and writes durable facts to `AGENTS.md`.
+
+The repo modes have a **repo path** box; all modes share the model dropdown and a
+clear-chat button.
+

@@ -15,7 +15,7 @@ def run_with_tools(
     functions: dict[str, Callable],
     tool_schemas: list[dict],
     *,
-    max_turns: int = 5,
+    max_turns: int = 12,
 ) -> str:
     """Run a tool-calling loop using local Python functions.
 
@@ -40,9 +40,17 @@ def run_with_tools(
 
         messages.append(message.model_dump(exclude_none=True))
         for call in tool_calls:
-            func = functions[call.function.name]
-            arguments = json.loads(call.function.arguments or "{}")
-            result = func(**arguments)
+            name = call.function.name
+            try:
+                func = functions[name]
+            except KeyError:
+                result = f"Error: unknown tool '{name}'."
+            else:
+                try:
+                    arguments = json.loads(call.function.arguments or "{}")
+                    result = func(**arguments)
+                except Exception as exc:  # keep the loop alive on tool failure
+                    result = f"Tool '{name}' failed: {exc}"
             messages.append(
                 {
                     "role": "tool",

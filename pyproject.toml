@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+ui = ["streamlit>=1.30"]
 
 [project.scripts]
 dbx-llm = "dbx_llm.cli:main"

@@ -2,8 +2,7 @@
 
 A small, **portable** Python library + CLI to chat with **Databricks-hosted models**.
 
-No cPME, no MCP, no MLflow — just import it (or run the CLI) and build your own
-things on top of any model served in your Databricks workspace. Think of it as a
+Think of it as a
 lightweight, model-selectable chat client you fully control.
 
 ---
@@ -75,7 +74,7 @@ python -m venv .venv
 # macOS / Linux
 source .venv/bin/activate
 
-pip install -e .
+python -m pip install -e .
 ```
 
 Copy the env template (it's already filled with the default profile):
@@ -90,26 +89,22 @@ cp .env.example .env   # already present in this repo
 
 ```bash
 # See which models you can pick (your workspace serving endpoints)
-dbx-llm --list-models
+python -m dbx_llm --list-models
 
 # See available prompt files
-dbx-llm --list-prompts
+python -m dbx_llm --list-prompts
 
 # Start chatting with a specific model + the default prompt
-dbx-llm --model databricks-claude-opus-4-6
+python -m dbx_llm --model databricks-claude-opus-4-6
 
 # Use a different prompt file (prompts/coder.md) and another model
-dbx-llm --prompt coder --model databricks-meta-llama-3-3-70b-instruct
+python -m dbx_llm --prompt coder --model databricks-meta-llama-3-3-70b-instruct
 ```
 
-> **Locked-down / corporate machines:** if running the `dbx-llm` command is
-> blocked by group policy (it's an auto-generated `.exe`), use the module form
-> instead — it does exactly the same thing:
->
-> ```bash
-> python -m dbx_llm --list-models
-> python -m dbx_llm --model databricks-claude-opus-4-6
-> ```
+> **Shortcut:** if the auto-generated `dbx-llm` launcher isn't blocked on your
+> machine, you can drop the `python -m` prefix and just run `dbx-llm ...`. On
+> locked-down / corporate machines the `.exe` is blocked by group policy, so use
+> the `python -m dbx_llm ...` form shown above — it does exactly the same thing.
 
 Inside the REPL, type a message and press Enter. Conversation history is kept
 for the session. Press `Ctrl-C` to exit.
@@ -117,6 +112,139 @@ for the session. Press `Ctrl-C` to exit.
 **Change behavior by editing prompts** — open `prompts/default.md`, change the
 text, save, and the next run uses your new system prompt. Add new `*.md` files to
 `prompts/` and select them with `--prompt <name>`.
+
+---
+
+## Repo agent (a read-only "codebase expert")
+
+Run `dbx-llm` as an agent that can explore the repository it's launched in and
+answer questions about it. It uses tool-calling to read files, list the tree,
+and search the code — then answers from what it actually found.
+
+```bash
+# From inside any repository (defaults to the current directory):
+python -m dbx_llm --repo
+
+# Or point it at a specific path:
+python -m dbx_llm --repo path/to/repo --model databricks-claude-opus-4-6
+```
+
+Then ask things like *"how does authentication work here?"* or *"where is the
+CLI entry point?"* — the agent reads the relevant files before answering.
+
+**Install it into another repo** so it's available there:
+
+```bash
+# from your other repo's environment
+python -m pip install -e "path/to/dbx-llm"
+python -m dbx_llm --repo
+```
+
+**What it can and can't do:**
+
+- ✅ **Read-only by default.** It can `list_files`, `read_file`, and
+  `search_code`. It **cannot** modify your files unless you pass `--write`.
+- 🧠 **Living memory.** It reads an `AGENTS.md` file from the repo root at
+  startup (if present) and can append durable notes to it via a `save_note`
+  tool, so it gets smarter about the repo over time.
+- 🔒 **Sandboxed & safe.** All file access is confined to the repo root (no
+  `..` escapes) and it refuses to read secrets such as `.env`.
+
+#### How the `AGENTS.md` memory is loaded
+
+- **Per repo, at the root you point at.** Running inside this repo reads
+  `./AGENTS.md`; running `--repo C:\other` reads `C:\other\AGENTS.md`. The
+  installed dbx-llm package is never the memory location — the memory always
+  lives in the codebase being explored.
+- **Read once, at startup.** The file is loaded into the agent's *system
+  prompt* when the session starts and stays in context for every message that
+  session. It is **not** re-read on each prompt.
+- **Notes saved mid-session** are appended to the file immediately, but the
+  system-prompt snapshot isn't rebuilt — **restart** the session to fold new
+  notes into the system prompt.
+- **Plain chat does not read `AGENTS.md`.** Only `--repo` and `--scan` use it;
+  plain chat uses the `prompts/<name>.md` system prompt instead.
+- **Commit it (don't gitignore).** It's curated documentation that should
+  travel with the repo so teammates and future sessions inherit the knowledge.
+  Each target repo's own `.gitignore` governs its own `AGENTS.md`.
+
+### Seeding its memory with a scan (`--scan`)
+
+To kick-start the living memory, run a one-shot deep survey: the agent walks the
+whole repo (`list_files` → `read_file`) and records the durable facts it finds to
+`AGENTS.md`, then exits.
+
+```bash
+python -m dbx_llm --scan --model databricks-claude-opus-4-6
+python -m dbx_llm --scan --repo path/to/other-repo --model databricks-claude-opus-4-6
+```
+
+It's read-only apart from appending to `AGENTS.md`, skips anything already
+remembered, and prints a summary of what it recorded. Re-run it any time the
+codebase changes substantially.
+
+
+### Letting it edit (opt-in)
+
+Add `--write` to give the agent `write_file` and `edit_file` tools:
+
+```bash
+python -m dbx_llm --repo --write
+```
+
+Every change is **shown to you as a diff and applied only after you approve it**:
+
+```
+--- proposed edit: README.md ---
+@@ ... @@
+-old line
++new line
+Apply this change? [y/N]
+```
+
+Type `y` to apply, anything else to cancel. Writes stay sandboxed to the repo
+root and refuse secrets (`.env`) and the `.git/` directory. Since your repo is
+version-controlled, `git diff` / `git checkout` are your safety net for undo.
+
+**Self-protection.** When you run the agent on the dbx-llm repo itself, it
+refuses to edit its own source by default, so it can't quietly rewrite its own
+guardrails. If you actually want it to help develop dbx-llm, opt in:
+
+```bash
+python -m dbx_llm --repo --write --allow-self-edit
+```
+
+(Installed into any other repo, this has no effect — dbx-llm's source lives
+outside that repo and is already out of reach.)
+
+---
+
+## Browser GUI (Streamlit)
+
+The terminal CLI is the primary interface, but there's also an optional
+Streamlit front-end that mirrors **all** of the CLI's modes in your browser. It
+imports the same `dbx_llm` library, so nothing about the CLI changes.
+
+```bash
+# one-time: install the optional UI dependency
+python -m pip install -e ".[ui]"
+
+# launch (opens a browser tab)
+python -m streamlit run app.py
+```
+
+Pick a **Mode** in the sidebar — each one is the GUI equivalent of a CLI flag:
+
+| Mode | CLI equivalent | What it does |
+| --- | --- | --- |
+| 💬 **Chat** | `python -m dbx_llm` | Plain chat with a selectable system prompt (`default`, `coder`, …). Each prompt shows a one-line description. |
+| 📖 **Repo Q&A (read-only)** | `python -m dbx_llm --repo` | Codebase-expert agent that explores a repo with read-only tools before answering. |
+| ✏️ **Repo Write (edit with approval)** | `python -m dbx_llm --repo --write` | Same agent, allowed to edit files. Every change is shown as a **diff** and applied only after you click **✅ Approve** (or **❌ Reject**) — the browser equivalent of the terminal's `y/N` confirm. A checkbox enables `--allow-self-edit`. |
+| 🧠 **Scan / set memory** | `python -m dbx_llm --repo --scan` | One-shot survey that records durable facts to `AGENTS.md`, then shows the summary and the current memory file. |
+
+Shared sidebar controls: a **model dropdown**, a **repo path** box (for the repo
+modes), and a clear-chat button. The diff-and-approve flow means editing is just
+as safe in the browser as it is in the terminal.
 
 ---
 
@@ -195,8 +323,8 @@ source — it stays entirely optional and separate from the core.
 
 ## Troubleshooting
 
-- **`dbx-llm --list-models` prints nothing / errors** → you're not authenticated.
-  Run `databricks auth login` and confirm `databricks current-user me` works.
+- **`python -m dbx_llm --list-models` prints nothing / errors** → you're not
+  authenticated. Run `databricks auth login` and confirm `databricks current-user me` works.
 - **`Prompt '<name>' not found`** → the file `prompts/<name>.md` doesn't exist,
   or you're running from a different directory (set `DBX_LLM_PROMPT_DIR`).
 - **Auth picked the wrong workspace** → check `DATABRICKS_CONFIG_PROFILE` in
