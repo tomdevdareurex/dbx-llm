@@ -23,10 +23,13 @@ unchanged.
 
 from __future__ import annotations
 
+import html
 import json
+import re
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from dbx_llm import chat, list_models, list_prompts, load_prompt
 from dbx_llm.repo_tools import (
@@ -70,6 +73,107 @@ class _NeedApproval(Exception):
 
 def _raise_confirm(action: str, rel_path: str, diff: str) -> bool:
     raise _NeedApproval(action, rel_path, diff)
+
+
+# --- Pretty diff rendering -------------------------------------------------
+_HUNK_RE = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+_DIFF_CSS = """
+<style>
+  body { margin: 0; }
+  .diff {
+    border: 1px solid #30363d; border-radius: 6px; overflow: hidden;
+    background: #0d1117; color: #c9d1d9;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .diff-head {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #161b22; border-bottom: 1px solid #30363d;
+    padding: 6px 12px; font-weight: 600;
+  }
+  .diff-head .add { color: #3fb950; }
+  .diff-head .del { color: #f85149; }
+  .diff table { border-collapse: collapse; width: 100%; }
+  .diff td { padding: 0 10px; vertical-align: top; white-space: pre-wrap; word-break: break-word; }
+  .diff td.ln {
+    width: 1%; text-align: right; color: #6e7681; white-space: nowrap;
+    user-select: none; border-right: 1px solid #21262d;
+  }
+  .diff td.sign { width: 1%; padding: 0 4px; color: #6e7681; user-select: none; }
+  .diff tr.add { background: rgba(46,160,67,0.15); }
+  .diff tr.add td.code { color: #aff5b4; }
+  .diff tr.del { background: rgba(248,81,73,0.15); }
+  .diff tr.del td.code { color: #ffdcd7; }
+  .diff tr.hunk td { background: #161b22; color: #79c0ff; }
+</style>
+"""
+
+
+def _diff_to_rows(diff: str) -> tuple[str, int, int]:
+    """Turn a unified diff into styled <tr> rows + (added, removed) counts."""
+    rows: list[str] = []
+    old_ln = new_ln = 0
+    adds = dels = 0
+    for raw in diff.splitlines():
+        if raw.startswith(("--- ", "+++ ")):
+            continue
+        if raw.startswith("@@"):
+            m = _HUNK_RE.match(raw)
+            if m:
+                old_ln, new_ln = int(m.group(1)), int(m.group(2))
+            rows.append(
+                '<tr class="hunk"><td class="ln"></td><td class="ln"></td>'
+                f'<td class="sign"></td><td class="code">{html.escape(raw)}</td></tr>'
+            )
+            continue
+        sign, text = raw[:1], html.escape(raw[1:])
+        if sign == "+":
+            adds += 1
+            rows.append(
+                f'<tr class="add"><td class="ln"></td><td class="ln">{new_ln}</td>'
+                f'<td class="sign">+</td><td class="code">{text}</td></tr>'
+            )
+            new_ln += 1
+        elif sign == "-":
+            dels += 1
+            rows.append(
+                f'<tr class="del"><td class="ln">{old_ln}</td><td class="ln"></td>'
+                f'<td class="sign">-</td><td class="code">{text}</td></tr>'
+            )
+            old_ln += 1
+        elif sign == "\\":  # "\ No newline at end of file"
+            rows.append(
+                '<tr><td class="ln"></td><td class="ln"></td>'
+                f'<td class="sign"></td><td class="code">{html.escape(raw)}</td></tr>'
+            )
+        else:  # context line (leading space)
+            rows.append(
+                f'<tr><td class="ln">{old_ln}</td><td class="ln">{new_ln}</td>'
+                f'<td class="sign"></td><td class="code">{text}</td></tr>'
+            )
+            old_ln += 1
+            new_ln += 1
+    return "\n".join(rows), adds, dels
+
+
+def _render_diff(diff: str, rel_path: str) -> None:
+    """Render a unified diff as a GitHub-style colored panel (no extra deps)."""
+    if not diff.strip():
+        st.caption("_(no textual changes)_")
+        return
+    body, adds, dels = _diff_to_rows(diff)
+    n_rows = body.count("<tr")
+    height = min(46 + n_rows * 21, 540)
+    doc = (
+        f"{_DIFF_CSS}"
+        f'<div class="diff"><div class="diff-head">'
+        f"<span>{html.escape(rel_path)}</span>"
+        f'<span><span class="add">+{adds}</span>&nbsp;&nbsp;'
+        f'<span class="del">\u2212{dels}</span></span></div>'
+        f"<table>{body}</table></div>"
+    )
+    components.html(doc, height=height, scrolling=True)
 
 
 @st.cache_data(show_spinner=False)
@@ -336,7 +440,7 @@ def render_write() -> None:
     if pending is not None:
         with st.chat_message("assistant"):
             st.markdown(f"Proposed **{pending['action']}** to `{pending['rel']}`:")
-            st.code(pending["diff"] or "(no textual changes)", language="diff")
+            _render_diff(pending["diff"], pending["rel"])
             col_yes, col_no = st.columns(2)
             if col_yes.button("✅ Approve", use_container_width=True):
                 st.session_state["w_decision"] = True
