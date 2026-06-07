@@ -226,6 +226,13 @@ def _chat_system(prompt_name: str) -> dict:
 # --- Sidebar ---------------------------------------------------------------
 st.sidebar.title("dbx-llm")
 
+# Make it obvious which repo this tab is bound to. The agent modes default their
+# "Repo path" to "." which resolves against this launch directory, so when more
+# than one GUI is running (each on its own port), this banner tells the tabs
+# apart at a glance.
+_LAUNCH_CWD = Path.cwd().resolve()
+st.sidebar.caption(f"🗂️ Serving from `{_LAUNCH_CWD}`")
+
 models = _sort_models(_models())
 if not models:
     st.error("No serving endpoints found. Run `databricks auth login` first.")
