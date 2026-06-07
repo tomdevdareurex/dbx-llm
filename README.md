@@ -23,6 +23,7 @@ lightweight, model-selectable chat client you fully control.
 - [Optional: tool / function calling](#optional-tool--function-calling)
 - [Configuration reference](#configuration-reference)
 - [Troubleshooting](#troubleshooting)
+- [Databricks connection](#databricks-connection)
 
 ---
 
@@ -35,6 +36,10 @@ and already authenticated:
 ```python
 from databricks.sdk import WorkspaceClient
 client = WorkspaceClient().serving_endpoints.get_open_ai_client()
+
+from dbx_llm.client import _workspace
+ep = _workspace().serving_endpoints.get("databricks-claude-opus-4-6")
+print(ep)   # look at .config / .config.served_entities
 ```
 
 Everything in this library is built on that single primitive. Your auth comes
@@ -129,6 +134,10 @@ python -m pip install "dbx-llm[ui] @ git+https://github.com/tomdevdareurex/dbx-l
 
 # pin to a branch / tag / commit
 python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git@master"
+
+or 
+
+python -m pip install --upgrade --force-reinstall --no-cache-dir "git+https://github.com/tomdevdareurex/dbx-llm@master"
 ```
 
 > A git install fetches only what's **pushed**. Run `git push` first so your
@@ -398,3 +407,121 @@ source — it stays entirely optional and separate from the core.
   the file.
 - **Auth picked the wrong workspace** → check `DATABRICKS_CONFIG_PROFILE` in
   `.env` and the matching entry in `~/.databrickscfg`.
+
+
+## Databricks connection
+
+Everything in dbx-llm talks to **one** thing: your Databricks workspace, over
+HTTPS. The Databricks SDK (a local Python library) resolves your auth and points
+the OpenAI client at the workspace. So all you need to set up is (1) the CLI and
+(2) a working login.
+
+### 1. Install the Databricks CLI
+
+Full instructions: [Databricks CLI installation](https://docs.databricks.com/aws/en/dev-tools/cli/install).
+Use **either** a package manager **or** a manual download.
+
+**Option A — package manager (quickest where allowed):**
+
+```bash
+# Windows (winget)
+winget install Databricks.DatabricksCLI
+
+# macOS / Linux (Homebrew)
+brew tap databricks/tap
+brew install databricks
+
+# macOS / Linux (curl, no Homebrew)
+curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+```
+
+**Option B — manual download (no admin / locked-down Windows):**
+
+1. Download the release ZIP for your OS/arch from the
+   [Databricks CLI releases page](https://github.com/databricks/cli/releases)
+   (e.g. `databricks_cli_1.1.0_windows_amd64.zip`).
+2. Extract it to a folder, e.g.
+   `C:\Users\wn686\OneDrive - Deutsche Börse AG\Desktop\REPOs\databricks_cli_1.1.0_windows_amd64`.
+3. Add that folder to your **user PATH** so `databricks` works from any terminal.
+
+**Why the PATH step matters.** The Databricks Python SDK (used at runtime) shells
+out to `databricks.exe` to refresh your OAuth token automatically. It finds the
+exe via PATH — it doesn't know where you extracted the ZIP. Without this step,
+auth fails with `"cannot configure default credentials"`.
+
+**Add it to PATH (PowerShell):**
+
+```powershell
+$cliPath     = "C:\Users\wn686\OneDrive - Deutsche Börse AG\Desktop\REPOs\databricks_cli_1.1.0_windows_amd64"
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($currentPath -notlike "*$cliPath*") {
+    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$cliPath", "User")
+}
+```
+
+What each line does:
+- Line 1: the folder where `databricks.exe` lives (change to your extract path).
+- Line 2: reads your current **user** PATH (no admin rights needed).
+- Line 3: the `if` guard skips appending if the folder is already on PATH, so
+  re-running this is safe (no duplicate entries).
+- Line 4: appends the CLI folder and saves it permanently.
+
+> **Restart required.** Close and reopen VS Code (or any terminal) so the new
+> PATH takes effect — terminals inherit PATH from when their parent app started,
+> so existing ones won't see the change.
+
+Verify it's on your PATH (either option, in a **fresh** terminal):
+
+```bash
+databricks --version
+```
+
+> The CLI is a separate tool from the `databricks-sdk` Python package. dbx-llm
+> uses the SDK at runtime, but you use the CLI **once** to create the login
+> profile the SDK then reads.
+
+### 2. Set up local authentication
+
+To reach Databricks from your machine you need to authenticate. Choose one:
+
+**Option 1: OAuth via the Databricks CLI (recommended)**
+
+See the [CLI OAuth (U2M) docs](https://docs.databricks.com/aws/en/dev-tools/cli/authentication#oauth-user-to-machine-u2m-authentication).
+
+```bash
+databricks auth login --host https://<your-workspace-host>
+```
+
+This opens a browser SSO flow and writes an OAuth profile to `~/.databrickscfg`.
+Point dbx-llm at that profile in your `.env`:
+
+```bash
+DATABRICKS_CONFIG_PROFILE="DEFAULT"   # change to the profile name you chose
+```
+
+**Option 2: Personal Access Token (PAT)**
+
+> ⚠️ **PATs are often disabled by org policy (they are at Deutsche Börse).** Use
+> Option 1 unless you know PATs are allowed in your workspace.
+
+See the [PAT documentation](https://docs.databricks.com/aws/en/dev-tools/auth/pat#databricks-personal-access-tokens-for-workspace-users).
+
+```bash
+# Add these to your .env file (overrides the profile)
+DATABRICKS_HOST="https://host.databricks.com"
+DATABRICKS_TOKEN="dapi_token"
+```
+
+More detail: [Databricks SDK authentication docs](https://docs.databricks.com/aws/en/dev-tools/sdk-python#authenticate-the-databricks-sdk-for-python-with-your-databricks-account-or-workspace).
+
+### 3. Verify the connection
+
+Confirm auth works before running dbx-llm:
+
+```bash
+databricks current-user me      # should print your identity
+python -m dbx_llm --list-models # should list your serving endpoints
+```
+
+If `current-user me` fails, the problem is network/auth (VPN, IP allowlist, or
+Conditional Access), not dbx-llm.
