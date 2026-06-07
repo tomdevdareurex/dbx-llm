@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,25 @@ def _repo_scan(model: str, root: Path) -> None:
     print(f"\n{summary}\n")
 
 
+def _free_port(preferred: int = 8501) -> int:
+    """Return an available TCP port, preferring ``preferred``.
+
+    Streamlit binds 8501 by default and does *not* auto-increment, so launching
+    a second GUI while one is already running silently collides on the same port
+    (both terminals print 8501 and you end up viewing whichever process owns the
+    socket). To let multiple repos run side by side, we pick the first free port
+    starting at ``preferred`` and pass it explicitly to ``streamlit run``.
+    """
+    for port in range(preferred, preferred + 100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    return preferred  # fall back; let Streamlit handle it
+
+
 def _launch_gui() -> None:
     """Launch the packaged Streamlit GUI from any working directory.
 
@@ -124,7 +144,19 @@ def _launch_gui() -> None:
         )
         return
     gui_path = Path(__file__).resolve().parent / "gui.py"
-    subprocess.run([sys.executable, "-m", "streamlit", "run", str(gui_path)])
+    port = _free_port()
+    print(f"Launching dbx-llm GUI on http://localhost:{port}  (cwd: {Path.cwd()})")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(gui_path),
+            "--server.port",
+            str(port),
+        ]
+    )
 
 
 def main() -> None:
