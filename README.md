@@ -30,7 +30,6 @@ dbx-llm/
 ├── pyproject.toml        # package metadata, the `dbx-llm` command, [ui] extra
 ├── README.md
 ├── quick_start_help.md   # condensed cheat-sheet for running it
-├── app.py                # thin dev launcher → runs the packaged GUI in-repo
 ├── .gitignore            # ignores .env, caches, build artifacts
 ├── .env.example          # template you copy to .env
 ├── .env                  # your local auth config (gitignored)
@@ -283,9 +282,6 @@ The agent modes' **repo path** box defaults to the current working directory, so
 run `python -m dbx_llm --gui` from the repo you want to explore. If the `[ui]`
 extra isn't installed, the command prints a short install hint instead of
 crashing.
-
-> Working inside this checkout, `python -m streamlit run app.py` still works —
-> `app.py` is now a thin launcher that runs the same packaged GUI.
 
 Pick a **Mode** in the sidebar — each one is the GUI equivalent of a CLI flag:
 

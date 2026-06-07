@@ -181,9 +181,6 @@ python -m pip install "dbx-llm[ui]"     # or, in this repo: -e ".[ui]"
 
 # launch from anywhere (opens a browser tab)
 python -m dbx_llm --gui
-
-# in-repo dev alternative (app.py is a thin launcher for the same GUI)
-python -m streamlit run app.py
 ```
 
 The agent modes' **repo path** box defaults to the current working directory, so
