@@ -111,21 +111,32 @@ def _repo_scan(model: str, root: Path) -> None:
     print(f"\n{summary}\n")
 
 
+def _port_in_use(port: int) -> bool:
+    """True if something is already *listening* on ``127.0.0.1:port``.
+
+    We probe by connecting rather than binding: on Windows a bind test is
+    unreliable because uvicorn binds ``0.0.0.0`` with ``SO_REUSEADDR``, so a
+    second process can bind the same port and a ``127.0.0.1`` bind probe won't
+    notice the existing ``0.0.0.0`` listener. ``connect_ex`` returning 0 means a
+    listener accepted the connection, i.e. the port is taken.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.25)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 def _free_port(preferred: int = 8501) -> int:
     """Return an available TCP port, preferring ``preferred``.
 
     Streamlit binds 8501 by default and does *not* auto-increment, so launching
     a second GUI while one is already running silently collides on the same port
     (both terminals print 8501 and you end up viewing whichever process owns the
-    socket). To let multiple repos run side by side, we pick the first free port
-    starting at ``preferred`` and pass it explicitly to ``streamlit run``.
+    socket). To let multiple repos run side by side, we pick the first port with
+    no active listener, starting at ``preferred``, and pass it explicitly to
+    ``streamlit run``.
     """
     for port in range(preferred, preferred + 100):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            try:
-                sock.bind(("127.0.0.1", port))
-            except OSError:
-                continue
+        if not _port_in_use(port):
             return port
     return preferred  # fall back; let Streamlit handle it
 
