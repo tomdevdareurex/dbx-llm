@@ -82,12 +82,14 @@ def _models() -> list[str]:
 _MODEL_PRIORITY = ("claude", "gpt", "gemini", "llama")
 
 
-def _model_sort_key(name: str) -> tuple[int, str]:
+def _model_sort_key(name: str) -> tuple[int, int, str]:
     lower = name.lower()
+    # Models that don't start with "databricks" always sort to the end.
+    not_databricks = 0 if lower.startswith("databricks") else 1
     for rank, family in enumerate(_MODEL_PRIORITY):
         if family in lower:  # "llama" matches "meta-llama-..."
-            return (rank, lower)
-    return (len(_MODEL_PRIORITY), lower)
+            return (not_databricks, rank, lower)
+    return (not_databricks, len(_MODEL_PRIORITY), lower)
 
 
 def _sort_models(models: list[str]) -> list[str]:
