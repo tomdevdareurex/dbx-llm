@@ -580,12 +580,12 @@ def render_scan() -> None:
 
     st.title(SCAN)
     st.caption(
-        f"One-shot survey of **{root}** → durable facts appended to "
+        f"One-shot survey of **{root}** → notes reconciled into "
         f"`{MEMORY_FILENAME}`. Read-only apart from that file."
     )
 
     if st.button("Run scan", type="primary"):
-        functions, schemas = build_repo_tools(root)  # read-only + save_note
+        functions, schemas = build_repo_tools(root, allow_memory_rewrite=True)
         messages = [
             {"role": "system", "content": build_repo_system_prompt(root, writable=False)},
             {"role": "user", "content": SCAN_TASK},

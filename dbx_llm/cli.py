@@ -124,7 +124,7 @@ def _repo_scan(model: str, root: Path) -> None:
     )
     from dbx_llm.tools import run_with_tools
 
-    functions, schemas = build_repo_tools(root)  # read-only + save_note
+    functions, schemas = build_repo_tools(root, allow_memory_rewrite=True)
     system = build_repo_system_prompt(root, writable=False)
 
     print(f"Model:  {model}")

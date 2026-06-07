@@ -53,7 +53,7 @@ from the Databricks CLI / `~/.databrickscfg` — **no tokens in code**.
 dbx-llm/
 ├── pyproject.toml        # package metadata, the `dbx-llm` command, [ui] extra
 ├── README.md
-├── quick_start_help.md   # condensed cheat-sheet for running it
+├── QUICK_START.md        # condensed cheat-sheet for running it
 ├── .gitignore            # ignores .env, caches, build artifacts
 ├── .env.example          # template you copy to .env
 ├── .env                  # your local auth config (gitignored)
@@ -219,7 +219,8 @@ python -m dbx_llm --repo
   `search_code`. It **cannot** modify your files unless you pass `--write`.
 - 🧠 **Living memory.** It reads an `AGENTS.md` file from the repo root at
   startup (if present) and can append durable notes to it via a `save_note`
-  tool, so it gets smarter about the repo over time.
+  tool (and fully reconcile it during `--scan`), so it gets smarter about the
+  repo over time.
 - 🔒 **Sandboxed & safe.** All file access is confined to the repo root (no
   `..` escapes) and it refuses to read secrets such as `.env`.
 
@@ -241,20 +242,23 @@ python -m dbx_llm --repo
   travel with the repo so teammates and future sessions inherit the knowledge.
   Each target repo's own `.gitignore` governs its own `AGENTS.md`.
 
-### Seeding its memory with a scan (`--scan`)
+### Seeding & refreshing its memory with a scan (`--scan`)
 
-To kick-start the living memory, run a one-shot deep survey: the agent walks the
-whole repo (`list_files` → `read_file`) and records the durable facts it finds to
-`AGENTS.md`, then exits.
+To build or refresh the living memory, run a one-shot deep survey: the agent
+walks the whole repo (`list_files` → `read_file`) and **reconciles** `AGENTS.md`
+— it verifies the existing notes against the current code, fixes stale ones,
+drops obsolete ones, adds new findings, and reorganizes everything into clear
+sections — then exits.
 
 ```bash
 python -m dbx_llm --scan --model databricks-claude-opus-4-6
 python -m dbx_llm --scan --repo path/to/other-repo --model databricks-claude-opus-4-6
 ```
 
-It's read-only apart from appending to `AGENTS.md`, skips anything already
-remembered, and prints a summary of what it recorded. Re-run it any time the
-codebase changes substantially.
+It's read-only apart from rewriting `AGENTS.md` (the repo is git-tracked, so
+`git diff AGENTS.md` shows exactly what changed and `git checkout AGENTS.md`
+undoes it), and it prints a summary of what it added, fixed, and removed. Re-run
+it any time the codebase changes substantially.
 
 
 ### Letting it edit (opt-in)

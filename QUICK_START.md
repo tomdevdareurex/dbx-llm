@@ -94,7 +94,7 @@ Notes:
 | `--repo [PATH]` | optional | Run as a codebase-expert agent over PATH (defaults to current dir). Without `--write` it is **read-only**. |
 | `--write` | no | Only meaningful with `--repo`. Lets the agent change files — but every change is shown as a diff and applied only after you type `y`. |
 | `--allow-self-edit` | no | Only meaningful with `--write`. Lets the agent edit dbx-llm's *own* source. Off by default so it can't rewrite its own guardrails. |
-| `--scan` | no | One-shot: survey the repo and write findings to `AGENTS.md`, then exit. Pair with `--repo PATH` to target another repo. |
+| `--scan` | no | One-shot: survey the repo and reconcile `AGENTS.md` (verify, fix, drop stale, add new), then exit. Pair with `--repo PATH` to target another repo. |
 
 ## How the parser decides what to do
 
@@ -133,7 +133,7 @@ python -m dbx_llm --repo --model databricks-claude-opus-4-6
 python -m dbx_llm --repo C:\path\to\other-repo --model databricks-claude-opus-4-6
 ```
 
-### 3. Scan (fill AGENTS.md memory, then exit)
+### 3. Scan (build / refresh AGENTS.md memory, then exit)
 ```powershell
 python -m dbx_llm --scan --model databricks-claude-opus-4-6
 python -m dbx_llm --scan --repo C:\path\to\other-repo --model databricks-claude-opus-4-6
@@ -180,10 +180,10 @@ if you approve something you didn't mean to.
 | `--repo` | ✅ | read-only agent |
 | `--repo --write` | ✅ | agent that can edit (with confirmation) |
 | `--repo --write --allow-self-edit` | ✅ | also allowed to edit dbx-llm's own code |
-| `--scan` / `--scan --repo PATH` | ✅ | one-shot survey → AGENTS.md |
+| `--scan` / `--scan --repo PATH` | ✅ | one-shot survey → reconcile AGENTS.md |
 | `--write` alone (no `--repo`) | ⚠️ | parses fine but does nothing — plain chat ignores it |
 | `--allow-self-edit` without `--write` | ⚠️ | parses fine but does nothing |
-| `--scan --write` | ⚠️ | `--scan` wins; `--write` is ignored (scan only appends to AGENTS.md) |
+| `--scan --write` | ⚠️ | `--scan` wins; `--write` is ignored (scan rewrites AGENTS.md only) |
 
 ## How the AGENTS.md memory works
 
@@ -195,9 +195,9 @@ The repo agent keeps a *living memory* in an `AGENTS.md` file at the repo root.
 - **Read once, at startup.** It's baked into the agent's system prompt when the
   session starts and stays in context for every message that session. It is NOT
   re-read on each prompt.
-- **Mid-session notes** (via `save_note` or `--scan`) are written to the file
-  immediately, but to fold them into the system prompt you **restart** the
-  session.
+- **Mid-session notes** (via `save_note`) are appended to the file immediately;
+  `--scan` instead **reconciles** the whole file (verify, fix, drop, add). Either
+  way, to fold the changes into the system prompt you **restart** the session.
 - **Plain chat ignores it.** Only `--repo` and `--scan` use `AGENTS.md`; plain
   chat uses the selected `<name>.md` prompt instead.
 - **Commit it** (don't gitignore) so the knowledge travels with the repo.

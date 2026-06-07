@@ -104,6 +104,7 @@ def build_repo_tools(
     allow_write: bool = False,
     confirm: Callable[[str, str, str], bool] | None = None,
     protect_self: bool = True,
+    allow_memory_rewrite: bool = False,
 ) -> tuple[dict[str, Callable], list[dict]]:
     """Build the sandboxed repo tools bound to ``root``.
 
@@ -114,6 +115,10 @@ def build_repo_tools(
             write. Defaults to a terminal y/N prompt that shows the diff.
         protect_self: When True (default), refuse writes that land inside
             dbx-llm's own source directory, even if it sits under ``root``.
+        allow_memory_rewrite: When True, expose ``rewrite_memory`` so the agent
+            can replace AGENTS.md wholesale (used by ``--scan`` to reconcile the
+            living memory). Off for the interactive agent, which edits AGENTS.md
+            through the approval-gated ``edit_file`` instead.
 
     Returns:
         A ``(functions, schemas)`` pair for ``run_with_tools``.
@@ -184,6 +189,17 @@ def build_repo_tools(
             handle.write(entry)
         return f"Saved note to {MEMORY_FILENAME}."
 
+    def rewrite_memory(content: str) -> str:
+        """Replace AGENTS.md wholesale with a reconciled, restructured version.
+
+        Used by ``--scan`` to revise existing notes (fix or drop stale ones) and
+        complement them with new findings, then write one clean document. The
+        repo is git-tracked, so ``git checkout AGENTS.md`` is the undo button.
+        """
+        memory = root_path / MEMORY_FILENAME
+        memory.write_text(content.rstrip() + "\n", encoding="utf-8")
+        return f"Rewrote {MEMORY_FILENAME} ({len(content):,} chars)."
+
     def _writable_target(path: str) -> Path:
         target = _resolve_within(root_path, path)
         if _is_secret(target):
@@ -252,6 +268,8 @@ def build_repo_tools(
         "search_code": search_code,
         "save_note": save_note,
     }
+    if allow_memory_rewrite:
+        functions["rewrite_memory"] = rewrite_memory
     if allow_write:
         functions["write_file"] = write_file
         functions["edit_file"] = edit_file
@@ -330,6 +348,32 @@ def build_repo_tools(
             },
         },
     ]
+    if allow_memory_rewrite:
+        schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "rewrite_memory",
+                    "description": "Replace the ENTIRE AGENTS.md with a reconciled "
+                    "version. First verify the existing notes (shown in your system "
+                    "prompt) against the current code: keep accurate ones, fix wrong "
+                    "ones, drop obsolete ones, and add new durable facts. Provide the "
+                    "complete document — anything omitted is lost. Preserve "
+                    "still-valid knowledge you cannot disprove. Call this once.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The full, reconciled Markdown for "
+                                "AGENTS.md.",
+                            }
+                        },
+                        "required": ["content"],
+                    },
+                },
+            }
+        )
     if allow_write:
         schemas += [
             {
@@ -408,14 +452,27 @@ def build_repo_map(root: str | Path) -> str:
 
 # The one-shot task used by --scan / the GUI's "Scan / set memory" mode.
 SCAN_TASK = (
-    "Survey this entire repository and build its living memory.\n"
-    "1. Use list_files to see the layout.\n"
-    "2. read_file the important source files (entry points, core modules, config).\n"
-    "3. For each durable, non-obvious fact you find — architecture, conventions, "
-    "how components fit together, gotchas, build/run commands — call save_note "
-    "with a concise one-line note.\n"
-    "Skip transient details and anything already in AGENTS.md above. "
-    "When you have covered the codebase, give a short summary of what you recorded."
+    "Survey this repository and reconcile its living memory in AGENTS.md.\n"
+    "1. Read the current AGENTS.md notes shown in your system prompt (if any).\n"
+    "2. Use list_files to see the layout, then read_file the important sources "
+    "(entry points, core modules, config) to learn how it really works now.\n"
+    "3. Reconcile, don't just append: for every existing note, KEEP it if still "
+    "accurate, FIX it if the code has changed, and DROP it if it is obsolete or "
+    "wrong. Then ADD new durable, non-obvious facts you discovered.\n"
+    "4. Organize the result into these sections, each a short list of concise "
+    "one-line bullets ordered for fast scanning by an LLM:\n"
+    "   # AGENTS.md\n"
+    "   _Last reconciled: <today's date>_\n"
+    "   ## Overview        (what this repo is, in 1-2 lines)\n"
+    "   ## Architecture    (modules and how they fit together)\n"
+    "   ## Build & run     (commands to install, run, test)\n"
+    "   ## Conventions     (patterns, style, where things live)\n"
+    "   ## Auth & security (credentials, sandboxes, guardrails)\n"
+    "   ## Gotchas / notes (non-obvious pitfalls and fixes)\n"
+    "   Omit any section that has no content. Keep bullets factual and terse.\n"
+    "5. Call rewrite_memory ONCE with the complete, corrected document. Do not "
+    "drop still-valid facts you could not disprove.\n"
+    "Finally, give a short summary of what you added, fixed, and removed."
 )
 
 
