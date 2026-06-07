@@ -77,6 +77,23 @@ def _models() -> list[str]:
     return list_models()
 
 
+# Family groups shown first, in this order; each group sorted alphabetically.
+# Everything else follows, also alphabetically.
+_MODEL_PRIORITY = ("claude", "gpt", "gemini", "llama")
+
+
+def _model_sort_key(name: str) -> tuple[int, str]:
+    lower = name.lower()
+    for rank, family in enumerate(_MODEL_PRIORITY):
+        if family in lower:  # "llama" matches "meta-llama-..."
+            return (rank, lower)
+    return (len(_MODEL_PRIORITY), lower)
+
+
+def _sort_models(models: list[str]) -> list[str]:
+    return sorted(models, key=_model_sort_key)
+
+
 @st.cache_data(show_spinner=False)
 def _prompts() -> list[str]:
     return list_prompts()
@@ -103,7 +120,7 @@ def _chat_system(prompt_name: str) -> dict:
 # --- Sidebar ---------------------------------------------------------------
 st.sidebar.title("dbx-llm")
 
-models = _models()
+models = _sort_models(_models())
 if not models:
     st.error("No serving endpoints found. Run `databricks auth login` first.")
     st.stop()
