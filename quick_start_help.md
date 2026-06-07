@@ -45,9 +45,10 @@ Notes:
 - A git install fetches only what's **pushed** — run `git push` first. If the
   GitHub repo is private, add a token (`git+https://<TOKEN>@github.com/...`) or
   use SSH (`git+ssh://git@github.com/...`).
-- The `default` and `coder` prompts are **bundled in the package**, so plain
-  chat works in any repo with no setup. A local `prompts/` folder (or
-  `DBX_LLM_PROMPT_DIR`) still wins when present, so you can override per project.
+- The `default`, `coder`, and `repo_expert` prompts are **bundled in the
+  package**, so chat and the repo agent work in any repo with no setup. A local
+  `prompts/` folder (or `DBX_LLM_PROMPT_DIR`) still wins when present, so you can
+  override per project.
 - Always run as `python -m dbx_llm ...` (the `dbx-llm.exe` launcher is blocked by
   corporate group policy).
 
@@ -58,7 +59,7 @@ Notes:
 | Flag | Takes a value? | What it does |
 |------|----------------|--------------|
 | `--model NAME` | yes | Which Databricks serving endpoint to talk to. If omitted, it uses the first one in your list (which may be a dead endpoint), so always pass `--model databricks-claude-opus-4-6`. |
-| `--prompt NAME` | yes | Which system prompt from `prompts/` to load in plain chat. Default is `default`. Only affects plain chat. |
+| `--prompt NAME` | yes | Which bundled/local system prompt to load in plain chat. Default is `default`. Only affects plain chat. |
 | `--list-models` | no | Print available endpoints and exit. |
 | `--list-prompts` | no | Print available prompt files and exit. |
 | `--repo [PATH]` | optional | Run as a codebase-expert agent over PATH (defaults to current dir). Without `--write` it is **read-only**. |
@@ -86,7 +87,7 @@ So `--scan` wins over `--repo`, and `--repo` wins over plain chat.
 # just talk to the model
 python -m dbx_llm --model databricks-claude-opus-4-6
 
-# pick a different system prompt from prompts/
+# pick a different system prompt (e.g. the bundled `coder`)
 python -m dbx_llm --model databricks-claude-opus-4-6 --prompt coder
 ```
 
@@ -165,7 +166,7 @@ The repo agent keeps a *living memory* in an `AGENTS.md` file at the repo root.
   immediately, but to fold them into the system prompt you **restart** the
   session.
 - **Plain chat ignores it.** Only `--repo` and `--scan` use `AGENTS.md`; plain
-  chat uses `prompts/<name>.md` instead.
+  chat uses the selected `<name>.md` prompt instead.
 - **Commit it** (don't gitignore) so the knowledge travels with the repo.
 
 ## GUI option (Streamlit)

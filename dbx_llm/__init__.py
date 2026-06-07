@@ -3,7 +3,6 @@
 from dbx_llm.client import chat, get_client, list_models
 from dbx_llm.prompts import list_prompts, load_prompt
 from dbx_llm.repo_tools import (
-    DEFAULT_REPO_PROMPT,
     MEMORY_FILENAME,
     SCAN_TASK,
     build_repo_map,
@@ -24,7 +23,6 @@ __all__ = [
     "build_repo_system_prompt",
     "read_memory",
     "run_with_tools",
-    "DEFAULT_REPO_PROMPT",
     "MEMORY_FILENAME",
     "SCAN_TASK",
 ]

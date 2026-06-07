@@ -33,9 +33,6 @@ dbx-llm/
 ├── .gitignore            # ignores .env, caches, build artifacts
 ├── .env.example          # template you copy to .env
 ├── .env                  # your local auth config (gitignored)
-├── prompts/              # editable system prompts (plain markdown)
-│   ├── default.md
-│   └── coder.md
 └── dbx_llm/
     ├── __init__.py       # public API: chat, list_models, load_prompt, ...
     ├── __main__.py       # enables `python -m dbx_llm`
@@ -45,7 +42,7 @@ dbx-llm/
     ├── gui.py            # Streamlit GUI (ships in the package; `--gui` runs it)
     ├── tools.py          # OPTIONAL function/tool-calling loop (not used by core)
     ├── repo_tools.py     # sandboxed repo tools + shared repo system prompt
-    └── _bundled_prompts/ # default/coder prompts shipped for use in any repo
+    └── _bundled_prompts/ # default/coder/repo_expert prompts shipped in the package
 ```
 
 ---
@@ -120,10 +117,10 @@ python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git@master"
 > credentials — use a token (`git+https://<TOKEN>@github.com/...`) or SSH
 > (`git+ssh://git@github.com/...`).
 >
-> The `default` and `coder` prompts are **bundled inside the package**, so plain
-> chat works anywhere with no extra setup. A local `prompts/` folder (or
-> `DBX_LLM_PROMPT_DIR`) still takes priority when present, so you can add or
-> override prompts per project.
+> The `default`, `coder`, and `repo_expert` prompts are **bundled inside the
+> package**, so chat and the repo agent work anywhere with no extra setup. A
+> local `prompts/` folder (or `DBX_LLM_PROMPT_DIR`) still takes priority when
+> present, so you can add or override prompts per project.
 
 ---
 
@@ -139,7 +136,7 @@ python -m dbx_llm --list-prompts
 # Start chatting with a specific model + the default prompt
 python -m dbx_llm --model databricks-claude-opus-4-6
 
-# Use a different prompt file (prompts/coder.md) and another model
+# Use a different prompt (the bundled `coder`) and another model
 python -m dbx_llm --prompt coder --model databricks-meta-llama-3-3-70b-instruct
 ```
 
@@ -151,9 +148,11 @@ python -m dbx_llm --prompt coder --model databricks-meta-llama-3-3-70b-instruct
 Inside the REPL, type a message and press Enter. Conversation history is kept
 for the session. Press `Ctrl-C` to exit.
 
-**Change behavior by editing prompts** — open `prompts/default.md`, change the
-text, save, and the next run uses your new system prompt. Add new `*.md` files to
-`prompts/` and select them with `--prompt <name>`.
+**Change behavior by editing prompts** — edit the bundled
+`dbx_llm/_bundled_prompts/default.md` (changes are live with an editable `-e .`
+install), or drop a `*.md` into a local `prompts/` folder (or set
+`DBX_LLM_PROMPT_DIR`) to add or override prompts per project, then select them
+with `--prompt <name>`.
 
 ---
 
@@ -205,7 +204,7 @@ python -m dbx_llm --repo
   system-prompt snapshot isn't rebuilt — **restart** the session to fold new
   notes into the system prompt.
 - **Plain chat does not read `AGENTS.md`.** Only `--repo` and `--scan` use it;
-  plain chat uses the `prompts/<name>.md` system prompt instead.
+  plain chat uses the selected `<name>.md` system prompt instead.
 - **Commit it (don't gitignore).** It's curated documentation that should
   travel with the repo so teammates and future sessions inherit the knowledge.
   Each target repo's own `.gitignore` governs its own `AGENTS.md`.
@@ -375,7 +374,8 @@ source — it stays entirely optional and separate from the core.
 
 - **`python -m dbx_llm --list-models` prints nothing / errors** → you're not
   authenticated. Run `databricks auth login` and confirm `databricks current-user me` works.
-- **`Prompt '<name>' not found`** → the file `prompts/<name>.md` doesn't exist,
-  or you're running from a different directory (set `DBX_LLM_PROMPT_DIR`).
+- **`Prompt '<name>' not found`** → no `<name>.md` exists in a local `prompts/`
+  folder, `DBX_LLM_PROMPT_DIR`, or the bundled prompts. Check the spelling or add
+  the file.
 - **Auth picked the wrong workspace** → check `DATABRICKS_CONFIG_PROFILE` in
   `.env` and the matching entry in `~/.databrickscfg`.

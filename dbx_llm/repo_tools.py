@@ -40,28 +40,6 @@ _SECRET_PATTERNS = (".env", ".env.*", "*.pem", "*.key", "id_rsa", "*.pfx")
 # The living-memory file the agent reads at startup and may append to.
 MEMORY_FILENAME = "AGENTS.md"
 
-# Bundled system prompt for the repo agent. Used when no editable
-# ``prompts/repo_expert.md`` is present (e.g. when installed into another repo).
-DEFAULT_REPO_PROMPT = """\
-You are an expert engineer who specializes in *this* repository. Your job is to
-answer questions and explain the codebase accurately.
-
-You have tools to explore the repository:
-- `list_files` — see what exists (optionally filtered by a glob).
-- `read_file` — read a file's contents before describing it.
-- `search_code` — find where something is defined or used.
-- `save_note` — append a durable fact or convention to AGENTS.md so it is
-  remembered in future sessions.
-
-Rules:
-- Investigate before answering. Prefer reading the actual files over guessing.
-- Ground every claim in what the tools return; cite file paths and line numbers.
-- If something is not in the repository, say so plainly.
-- When you discover a lasting, non-obvious fact about how this repo works (a
-  convention, gotcha, or architectural decision), use `save_note` to record it.
-- Keep answers focused and concise.
-"""
-
 
 # Cap how much data a single tool call returns, to protect the context window.
 _MAX_FILE_BYTES = 100_000
@@ -449,8 +427,7 @@ def build_repo_system_prompt(
 ) -> str:
     """Assemble the repo agent's system prompt.
 
-    Combines the ``repo_expert`` prompt (or ``DEFAULT_REPO_PROMPT`` when no
-    editable prompt file is present), the repository root, a file map, the
+    Combines the ``repo_expert`` prompt, the repository root, a file map, the
     remembered AGENTS.md notes, and a mode-specific note describing whether
     editing is enabled. Shared by the CLI (``--repo`` / ``--scan``) and the
     Streamlit GUI so all front-ends stay in sync.
@@ -458,10 +435,7 @@ def build_repo_system_prompt(
     from dbx_llm.prompts import load_prompt
 
     root_path = Path(root).resolve()
-    try:
-        system = load_prompt("repo_expert")
-    except FileNotFoundError:
-        system = DEFAULT_REPO_PROMPT
+    system = load_prompt("repo_expert")
     system += f"\n\n# Repository root\n{root_path}\n\n# Files\n{build_repo_map(root_path)}"
     memory = read_memory(root_path)
     if memory:
