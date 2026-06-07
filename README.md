@@ -7,6 +7,25 @@ lightweight, model-selectable chat client you fully control.
 
 ---
 
+## Contents
+
+- [How it works](#how-it-works-the-whole-idea-in-one-line)
+- [Project layout](#project-layout)
+- [Prerequisites](#prerequisites)
+- [Install](#install) · [into another repo](#install-into-another-repo-or-another-machine)
+- [CLI usage](#cli-usage-the-chat-client-workflow)
+- [Repo agent (codebase expert)](#repo-agent-a-read-only-codebase-expert)
+  - [How `AGENTS.md` memory is loaded](#how-the-agentsmd-memory-is-loaded)
+  - [Seeding memory with a scan (`--scan`)](#seeding-its-memory-with-a-scan---scan)
+  - [Letting it edit (opt-in)](#letting-it-edit-opt-in)
+- [Browser GUI (Streamlit)](#browser-gui-streamlit)
+- [Library usage](#library-usage-import-it-and-build-things)
+- [Optional: tool / function calling](#optional-tool--function-calling)
+- [Configuration reference](#configuration-reference)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## How it works (the whole idea in one line)
 
 Databricks model serving endpoints are **OpenAI-compatible**. The Databricks SDK
@@ -191,7 +210,7 @@ python -m dbx_llm --repo
 - 🔒 **Sandboxed & safe.** All file access is confined to the repo root (no
   `..` escapes) and it refuses to read secrets such as `.env`.
 
-#### How the `AGENTS.md` memory is loaded
+### How the `AGENTS.md` memory is loaded
 
 - **Per repo, at the root you point at.** Running inside this repo reads
   `./AGENTS.md`; running `--repo C:\other` reads `C:\other\AGENTS.md`. The
@@ -364,7 +383,7 @@ source — it stays entirely optional and separate from the core.
 |---|---|
 | `DATABRICKS_CONFIG_PROFILE` | Which `~/.databrickscfg` profile to use (default: `DEFAULT`). |
 | `DATABRICKS_HOST` / `DATABRICKS_TOKEN` | Direct auth, overrides the profile. |
-| `DBX_LLM_PROMPT_DIR` | Custom directory for prompt files (default: `./prompts`). |
+| `DBX_LLM_PROMPT_DIR` | Local prompt directory checked before the bundled prompts (default: `./prompts`). |
 
 `.env` is **gitignored** — your credentials never get committed.
 

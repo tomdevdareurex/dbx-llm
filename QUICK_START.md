@@ -1,3 +1,28 @@
+# dbx-llm — quick start
+
+A condensed cheat-sheet for running dbx-llm. For the full guide, see
+[README.md](README.md).
+
+## Contents
+
+- [First run (in this repo)](#first-run-in-this-repo)
+- [Install](#install)
+- [Options to run](#options-to-run)
+  - [The flags](#the-flags-what-the-parser-understands)
+  - [How the parser decides](#how-the-parser-decides-what-to-do)
+  - [The three modes](#the-three-modes-you-actually-run)
+  - [What "write / edit" means](#what-write--edit-actually-means-and-how-to-use-it)
+  - [Combinations cheat-sheet](#combinations-cheat-sheet)
+  - [How `AGENTS.md` memory works](#how-the-agentsmd-memory-works)
+  - [GUI option (Streamlit)](#gui-option-streamlit)
+
+## First run (in this repo)
+
+```powershell
+# 1. Create & activate a virtual env, then install (add ".[ui]" for the GUI)
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -e .
 
 # 2. Confirm Databricks auth works
 databricks current-user me
@@ -7,12 +32,16 @@ databricks current-user me
 
 # 4. Start chatting
 .\.venv\Scripts\python.exe -m dbx_llm --model databricks-claude-opus-4-6
+```
 
+Inspect an endpoint's details (e.g. context window) from Python:
 
-# Check context window
+```python
 from dbx_llm.client import _workspace
+
 ep = _workspace().serving_endpoints.get("databricks-claude-opus-4-6")
 print(ep)
+```
 
 # Install
 
@@ -71,11 +100,12 @@ Notes:
 
 It checks in this order and stops at the first match:
 
-1. `--list-models` → print models, exit.
-2. `--list-prompts` → print prompts, exit.
-3. `--scan` → run the one-shot survey, exit.
-4. `--repo` present → start the interactive repo agent.
-5. none of the above → start a plain chat session.
+1. `--gui` → launch the Streamlit GUI, exit.
+2. `--list-models` → print models, exit.
+3. `--list-prompts` → print prompts, exit.
+4. `--scan` → run the one-shot survey, exit.
+5. `--repo` present → start the interactive repo agent.
+6. none of the above → start a plain chat session.
 
 So `--scan` wins over `--repo`, and `--repo` wins over plain chat.
 `--write` and `--allow-self-edit` are *modifiers* — they do nothing on their own.
