@@ -30,7 +30,7 @@ dbx-llm/
 ├── pyproject.toml        # package metadata, the `dbx-llm` command, [ui] extra
 ├── README.md
 ├── quick_start_help.md   # condensed cheat-sheet for running it
-├── app.py                # Streamlit GUI (mirrors every CLI mode in the browser)
+├── app.py                # thin dev launcher → runs the packaged GUI in-repo
 ├── .gitignore            # ignores .env, caches, build artifacts
 ├── .env.example          # template you copy to .env
 ├── .env                  # your local auth config (gitignored)
@@ -41,10 +41,12 @@ dbx-llm/
     ├── __init__.py       # public API: chat, list_models, load_prompt, ...
     ├── __main__.py       # enables `python -m dbx_llm`
     ├── client.py         # auth + OpenAI client + list_models + chat   (core)
-    ├── prompts.py        # load_prompt / list_prompts
-    ├── cli.py            # interactive REPL (the `dbx-llm` command)
+    ├── prompts.py        # load_prompt / list_prompts (local + bundled fallback)
+    ├── cli.py            # interactive REPL + `--gui` launcher
+    ├── gui.py            # Streamlit GUI (ships in the package; `--gui` runs it)
     ├── tools.py          # OPTIONAL function/tool-calling loop (not used by core)
-    └── repo_tools.py     # sandboxed repo tools + shared repo system prompt
+    ├── repo_tools.py     # sandboxed repo tools + shared repo system prompt
+    └── _bundled_prompts/ # default/coder prompts shipped for use in any repo
 ```
 
 ---
@@ -119,10 +121,10 @@ python -m pip install "git+https://github.com/tomdevdareurex/dbx-llm.git@master"
 > credentials — use a token (`git+https://<TOKEN>@github.com/...`) or SSH
 > (`git+ssh://git@github.com/...`).
 >
-> Heads-up: the bundled `prompts/` folder is **not** packaged, so in another repo
-> plain chat (`--prompt default`) needs either a local `prompts/` folder or
-> `DBX_LLM_PROMPT_DIR` pointing back here. The `--repo` agent works without it
-> (it falls back to a built-in prompt).
+> The `default` and `coder` prompts are **bundled inside the package**, so plain
+> chat works anywhere with no extra setup. A local `prompts/` folder (or
+> `DBX_LLM_PROMPT_DIR`) still takes priority when present, so you can add or
+> override prompts per project.
 
 ---
 
@@ -266,13 +268,24 @@ The terminal CLI is the primary interface, but there's also an optional
 Streamlit front-end that mirrors **all** of the CLI's modes in your browser. It
 imports the same `dbx_llm` library, so nothing about the CLI changes.
 
+The GUI **ships inside the package**, so once `dbx-llm[ui]` is installed you can
+launch it from **any** repo or directory — no need to be in this checkout:
+
 ```bash
 # one-time: install the optional UI dependency
-python -m pip install -e ".[ui]"
+python -m pip install "dbx-llm[ui]"        # or, in this repo: -e ".[ui]"
 
-# launch (opens a browser tab)
-python -m streamlit run app.py
+# launch from anywhere (opens a browser tab)
+python -m dbx_llm --gui
 ```
+
+The agent modes' **repo path** box defaults to the current working directory, so
+run `python -m dbx_llm --gui` from the repo you want to explore. If the `[ui]`
+extra isn't installed, the command prints a short install hint instead of
+crashing.
+
+> Working inside this checkout, `python -m streamlit run app.py` still works —
+> `app.py` is now a thin launcher that runs the same packaged GUI.
 
 Pick a **Mode** in the sidebar — each one is the GUI equivalent of a CLI flag:
 

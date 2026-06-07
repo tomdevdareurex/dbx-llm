@@ -1,6 +1,9 @@
 """Interactive CLI: a portable chat over Databricks-hosted models."""
 
 import argparse
+import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -107,6 +110,23 @@ def _repo_scan(model: str, root: Path) -> None:
     print(f"\n{summary}\n")
 
 
+def _launch_gui() -> None:
+    """Launch the packaged Streamlit GUI from any working directory.
+
+    The GUI ships inside the installed package (``dbx_llm/gui.py``), so this
+    works from any repo or machine without pointing at this source checkout.
+    """
+    if importlib.util.find_spec("streamlit") is None:
+        print(
+            "The browser GUI needs Streamlit. Install the optional extra:\n"
+            '    python -m pip install "dbx-llm[ui]"\n'
+            "or, from this repo:  python -m pip install -e \".[ui]\""
+        )
+        return
+    gui_path = Path(__file__).resolve().parent / "gui.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(gui_path)])
+
+
 def main() -> None:
     load_dotenv(override=True)
 
@@ -118,6 +138,11 @@ def main() -> None:
     parser.add_argument("--prompt", default="default", help="Prompt file in prompts/.")
     parser.add_argument("--list-models", action="store_true", help="List models and exit.")
     parser.add_argument("--list-prompts", action="store_true", help="List prompts and exit.")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the Streamlit browser GUI (needs the [ui] extra).",
+    )
     parser.add_argument(
         "--repo",
         nargs="?",
@@ -145,6 +170,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.gui:
+        _launch_gui()
+        return
     if args.list_models:
         print("\n".join(list_models()))
         return

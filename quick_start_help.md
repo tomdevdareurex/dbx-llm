@@ -45,9 +45,9 @@ Notes:
 - A git install fetches only what's **pushed** — run `git push` first. If the
   GitHub repo is private, add a token (`git+https://<TOKEN>@github.com/...`) or
   use SSH (`git+ssh://git@github.com/...`).
-- The bundled `prompts/` folder isn't packaged. In another repo, `--repo` works
-  (built-in fallback prompt) but plain chat `--prompt default` needs a local
-  `prompts/` folder or `DBX_LLM_PROMPT_DIR` pointing back here.
+- The `default` and `coder` prompts are **bundled in the package**, so plain
+  chat works in any repo with no setup. A local `prompts/` folder (or
+  `DBX_LLM_PROMPT_DIR`) still wins when present, so you can override per project.
 - Always run as `python -m dbx_llm ...` (the `dbx-llm.exe` launcher is blocked by
   corporate group policy).
 
@@ -171,21 +171,24 @@ The repo agent keeps a *living memory* in an `AGENTS.md` file at the repo root.
 ## GUI option (Streamlit)
 
 The terminal CLI above always works. There's also a Streamlit front-end that
-mirrors **every** CLI mode in your browser, using the same library underneath:
+mirrors **every** CLI mode in your browser, using the same library underneath.
+It ships **inside the package**, so once `[ui]` is installed it launches from any
+directory — no need to be in this checkout:
 
 ```powershell
 # one-time: install the optional UI dependency
-python -m pip install -e ".[ui]"
+python -m pip install "dbx-llm[ui]"     # or, in this repo: -e ".[ui]"
 
-# launch the GUI (opens a browser tab)
-.\.venv\Scripts\streamlit.exe run app.py
-# or:
+# launch from anywhere (opens a browser tab)
+python -m dbx_llm --gui
+
+# in-repo dev alternative (app.py is a thin launcher for the same GUI)
 python -m streamlit run app.py
 ```
 
-# Shows options
-python -m  dbx_llm --help
-
+The agent modes' **repo path** box defaults to the current working directory, so
+run `python -m dbx_llm --gui` from the repo you want to explore. Missing the
+`[ui]` extra? The command prints an install hint instead of crashing.
 
 Pick a **Mode** in the sidebar — it's the GUI version of the CLI flags:
 
