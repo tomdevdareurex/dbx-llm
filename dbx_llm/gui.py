@@ -229,22 +229,28 @@ def _fmt_int(n: int) -> str:
     return f"{n:,}"
 
 
+def _render_context_meter(stats: dict, model: str) -> None:
+    """Fill the context-window meter slot that sits right under the model picker."""
+    if not stats or not stats.get("turns"):
+        return
+    used = stats.get("last_prompt_tokens", 0)
+    limit = context_limit(model)
+    with CTX_METER.container():
+        if limit:
+            pct = min(used / limit, 1.0)
+            st.progress(pct, text=f"Context {pct:.0%}")
+            st.caption(f"🧮 {_fmt_int(used)} / {_fmt_int(limit)} tokens in context")
+        else:
+            st.caption(f"🧮 {_fmt_int(used)} tokens in context (limit unknown)")
+
+
 def _render_stats(stats: dict, model: str) -> None:
-    """Render the context-window meter + a session-stats expander in the sidebar."""
+    """Render the per-session stats expander in the sidebar."""
+    _render_context_meter(stats, model)
     if not stats or not stats.get("turns"):
         return
 
-    used = stats.get("last_prompt_tokens", 0)
-    limit = context_limit(model)
-
     st.sidebar.markdown("---")
-    if limit:
-        pct = min(used / limit, 1.0)
-        st.sidebar.progress(pct, text=f"Context {pct:.0%}")
-        st.sidebar.caption(f"🧮 {_fmt_int(used)} / {_fmt_int(limit)} tokens in context")
-    else:
-        st.sidebar.caption(f"🧮 {_fmt_int(used)} tokens in context (limit unknown)")
-
     with st.sidebar.expander("📊 Session stats"):
         st.metric("Last latency", f"{stats.get('last_latency', 0.0):.1f}s")
         tot_tok = stats.get("total_tokens", 0)
@@ -285,6 +291,10 @@ mode = st.sidebar.radio("Mode", [CHAT, QA, WRITE, SCAN])
 default_model_index = models.index(PREFERRED_MODEL) if PREFERRED_MODEL in models else 0
 model = st.sidebar.selectbox("Model", models, index=default_model_index)
 
+# Context-window meter lives right under the model picker. The active mode fills
+# this slot at the end of its render with the latest usage.
+CTX_METER = st.sidebar.empty()
+
 
 # ===========================================================================
 # Mode: plain chat
@@ -308,7 +318,7 @@ def render_chat() -> None:
     st.session_state.setdefault("chat_view", [])
     st.session_state.setdefault("chat_stats", new_stats())
 
-    st.title(CHAT)
+    st.subheader(CHAT)
     st.caption(f"Prompt: **{prompt_name}** — {_describe_prompt(prompt_name)}")
 
     for msg in st.session_state["chat_view"]:
@@ -353,48 +363,66 @@ def render_chat() -> None:
 # Mode: repo Q&A (read-only)
 # ===========================================================================
 def render_qa() -> None:
-    root = Path(st.sidebar.text_input("Repo path", value=".")).resolve()
+    root = _LAUNCH_CWD
     st.sidebar.caption(f"📁 {root}")
     st.sidebar.caption(_describe_prompt("repo_expert"))
     if st.sidebar.button("Clear chat", use_container_width=True):
-        for key in ("qa_view", "qa_msgs", "qa_sig", "qa_stats"):
+        for key in ("repo_view", "repo_msgs", "repo_sig", "repo_stats",
+                    "w_queue", "w_pending", "w_go", "w_decision"):
             st.session_state.pop(key, None)
         st.rerun()
 
     functions, schemas = build_repo_tools(root)  # read-only + save_note
 
     sig = str(root)
-    if st.session_state.get("qa_sig") != sig:
-        st.session_state["qa_msgs"] = [
+    if st.session_state.get("repo_sig") != sig:
+        st.session_state["repo_msgs"] = [
             {"role": "system", "content": build_repo_system_prompt(root, writable=False)}
         ]
-        st.session_state["qa_view"] = []
-        st.session_state["qa_stats"] = new_stats()
-        st.session_state["qa_sig"] = sig  # set last: a failure above won't mark as ready
-    st.session_state.setdefault("qa_view", [])
-    st.session_state.setdefault("qa_msgs", [])
-    st.session_state.setdefault("qa_stats", new_stats())
+        st.session_state["repo_view"] = []
+        st.session_state["repo_stats"] = new_stats()
+        st.session_state["repo_sig"] = sig  # set last: a failure above won't mark as ready
+    st.session_state.setdefault("repo_view", [])
+    st.session_state.setdefault("repo_msgs", [])
+    st.session_state.setdefault("repo_stats", new_stats())
 
-    st.title(QA)
+    # This conversation is shared with the Write mode. Reflect the read-only
+    # capability in the system prompt, and if we arrived here mid-edit (a
+    # pending/queued tool call left over from Write mode), cancel and answer
+    # those calls so the shared history stays API-valid for the next turn.
+    msgs = st.session_state["repo_msgs"]
+    if msgs and msgs[0].get("role") == "system":
+        msgs[0]["content"] = build_repo_system_prompt(root, writable=False)
+    queue = st.session_state.get("w_queue") or []
+    if queue or st.session_state.get("w_pending"):
+        for call in queue:
+            msgs.append({
+                "role": "tool", "tool_call_id": call["id"],
+                "content": "Edit cancelled: switched to read-only mode.",
+            })
+        for key in ("w_queue", "w_pending", "w_go", "w_decision"):
+            st.session_state.pop(key, None)
+
+    st.subheader(QA)
     st.caption(f"Read-only codebase expert over **{root}**")
 
-    for msg in st.session_state["qa_view"]:
+    for msg in st.session_state["repo_view"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     if user_input := st.chat_input("Ask about this repo"):
-        st.session_state["qa_view"].append({"role": "user", "content": user_input})
+        st.session_state["repo_view"].append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
-        st.session_state["qa_msgs"].append({"role": "user", "content": user_input})
+        st.session_state["repo_msgs"].append({"role": "user", "content": user_input})
         with st.chat_message("assistant"):
-            stats = st.session_state["qa_stats"]
+            stats = st.session_state["repo_stats"]
             with st.spinner("Exploring the repo…"):
                 start = time.perf_counter()
                 calls_before = sum((stats.get("tool_calls") or {}).values())
                 try:
                     reply = run_with_tools(
-                        model, st.session_state["qa_msgs"], functions, schemas,
+                        model, st.session_state["repo_msgs"], functions, schemas,
                         stats=stats,
                     )
                 except Exception as exc:
@@ -408,23 +436,24 @@ def render_qa() -> None:
                 f"⏱ {elapsed:.1f}s · {new_calls} tool call(s) · "
                 f"{_fmt_int(stats.get('last_prompt_tokens', 0))} tok in context"
             )
-        st.session_state["qa_view"].append({"role": "assistant", "content": reply})
+        st.session_state["repo_view"].append({"role": "assistant", "content": reply})
 
-    _render_stats(st.session_state["qa_stats"], model)
+    _render_stats(st.session_state["repo_stats"], model)
 
 
 # ===========================================================================
 # Mode: repo Write (edit with per-edit approval)
 # ===========================================================================
 def render_write() -> None:
-    root = Path(st.sidebar.text_input("Repo path", value=".")).resolve()
+    root = _LAUNCH_CWD
     allow_self_edit = st.sidebar.checkbox(
         "Allow editing dbx-llm's own source", value=False,
         help="Off by default so the agent can't rewrite its own guardrails.",
     )
     st.sidebar.caption(f"📁 {root}")
     if st.sidebar.button("Clear chat", use_container_width=True):
-        for key in ("w_view", "w_msgs", "w_queue", "w_pending", "w_sig", "w_go", "w_decision", "w_stats"):
+        for key in ("repo_view", "repo_msgs", "repo_sig", "repo_stats",
+                    "w_queue", "w_pending", "w_go", "w_decision"):
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -436,38 +465,48 @@ def render_write() -> None:
         root, allow_write=True, confirm=_raise_confirm, protect_self=protect_self
     )
 
-    sig = f"{root}|{allow_self_edit}"
-    if st.session_state.get("w_sig") != sig:
-        st.session_state["w_msgs"] = [
+    sig = str(root)
+    if st.session_state.get("repo_sig") != sig:
+        st.session_state["repo_msgs"] = [
             {"role": "system", "content": build_repo_system_prompt(root, writable=True, allow_self_edit=allow_self_edit)}
         ]
-        st.session_state["w_view"] = []
+        st.session_state["repo_view"] = []
+        st.session_state["repo_stats"] = new_stats()
         st.session_state["w_queue"] = []
         st.session_state["w_pending"] = None
-        st.session_state["w_stats"] = new_stats()
         st.session_state.pop("w_go", None)
         st.session_state.pop("w_decision", None)
-        st.session_state["w_sig"] = sig  # set last: a failure above won't mark as ready
-    st.session_state.setdefault("w_view", [])
-    st.session_state.setdefault("w_msgs", [])
+        st.session_state["repo_sig"] = sig  # set last: a failure above won't mark as ready
+    st.session_state.setdefault("repo_view", [])
+    st.session_state.setdefault("repo_msgs", [])
+    st.session_state.setdefault("repo_stats", new_stats())
     st.session_state.setdefault("w_queue", [])
-    st.session_state.setdefault("w_stats", new_stats())
+    st.session_state.setdefault("w_pending", None)
+
+    # This conversation is shared with the read-only mode. Keep the system
+    # prompt in sync with the *writable* capability (and the self-edit toggle)
+    # so flipping into this mode mid-thread tells the agent it may now edit.
+    repo_msgs0 = st.session_state["repo_msgs"]
+    if repo_msgs0 and repo_msgs0[0].get("role") == "system":
+        repo_msgs0[0]["content"] = build_repo_system_prompt(
+            root, writable=True, allow_self_edit=allow_self_edit
+        )
 
     def _append_tool(call_id: str, content: str) -> None:
-        st.session_state["w_msgs"].append(
+        st.session_state["repo_msgs"].append(
             {"role": "tool", "tool_call_id": call_id, "content": json.dumps(content, default=str)}
         )
 
     def _run_until_pause() -> None:
         """Drive the tool loop until it finishes or needs an edit approval."""
-        msgs = st.session_state["w_msgs"]
+        msgs = st.session_state["repo_msgs"]
         queue = st.session_state["w_queue"]
         while True:
             # Need a new model turn?
             if not queue and st.session_state["w_pending"] is None:
                 usage: dict = {}
                 message = chat(model, msgs, tools=schemas, usage=usage)
-                stats = st.session_state["w_stats"]
+                stats = st.session_state["repo_stats"]
                 if usage:
                     stats["turns"] += 1
                     stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
@@ -478,7 +517,7 @@ def render_write() -> None:
                 if not getattr(message, "tool_calls", None):
                     text = message.content or ""
                     msgs.append({"role": "assistant", "content": text})
-                    st.session_state["w_view"].append({"role": "assistant", "content": text})
+                    st.session_state["repo_view"].append({"role": "assistant", "content": text})
                     return
                 for c in message.tool_calls:
                     stats["tool_calls"][c.function.name] = (
@@ -512,13 +551,13 @@ def render_write() -> None:
                     queue.pop(0)
             # Queue drained → loop back for the next model turn.
 
-    st.title(WRITE)
+    st.subheader(WRITE)
     mode_note = "self-edit ON" if allow_self_edit else "own source protected"
     st.caption(f"Editing **{root}** with approval — {mode_note}")
-    _render_stats(st.session_state["w_stats"], model)
+    _render_stats(st.session_state["repo_stats"], model)
 
     # Render history.
-    for msg in st.session_state["w_view"]:
+    for msg in st.session_state["repo_view"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
@@ -529,12 +568,12 @@ def render_write() -> None:
         if approved:
             result = fns_apply[pending["name"]](**pending["args"])
             _append_tool(pending["id"], result)
-            st.session_state["w_view"].append(
+            st.session_state["repo_view"].append(
                 {"role": "assistant", "content": f"✅ Applied **{pending['action']}** to `{pending['rel']}`."}
             )
         else:
             _append_tool(pending["id"], "User rejected the edit; no change made.")
-            st.session_state["w_view"].append(
+            st.session_state["repo_view"].append(
                 {"role": "assistant", "content": f"❌ Rejected **{pending['action']}** to `{pending['rel']}`."}
             )
         st.session_state["w_queue"].pop(0)
@@ -564,14 +603,14 @@ def render_write() -> None:
             try:
                 _run_until_pause()
             except Exception as exc:
-                st.session_state["w_view"].append(
+                st.session_state["repo_view"].append(
                     {"role": "assistant", "content": f"⚠️ Error: {exc}"}
                 )
         st.rerun()
 
     if user_input := st.chat_input("Ask the agent to explain or change the repo"):
-        st.session_state["w_view"].append({"role": "user", "content": user_input})
-        st.session_state["w_msgs"].append({"role": "user", "content": user_input})
+        st.session_state["repo_view"].append({"role": "user", "content": user_input})
+        st.session_state["repo_msgs"].append({"role": "user", "content": user_input})
         st.session_state["w_go"] = True
         st.rerun()
 
@@ -580,10 +619,10 @@ def render_write() -> None:
 # Mode: scan / set memory
 # ===========================================================================
 def render_scan() -> None:
-    root = Path(st.sidebar.text_input("Repo path", value=".")).resolve()
+    root = _LAUNCH_CWD
     st.sidebar.caption(f"📁 {root}")
 
-    st.title(SCAN)
+    st.subheader(SCAN)
     st.caption(
         f"One-shot survey of **{root}** → notes reconciled into "
         f"`{MEMORY_FILENAME}`. Read-only apart from that file."
