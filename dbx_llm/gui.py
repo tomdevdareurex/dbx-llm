@@ -365,12 +365,14 @@ def render_qa() -> None:
 
     sig = str(root)
     if st.session_state.get("qa_sig") != sig:
-        st.session_state["qa_sig"] = sig
         st.session_state["qa_msgs"] = [
             {"role": "system", "content": build_repo_system_prompt(root, writable=False)}
         ]
         st.session_state["qa_view"] = []
         st.session_state["qa_stats"] = new_stats()
+        st.session_state["qa_sig"] = sig  # set last: a failure above won't mark as ready
+    st.session_state.setdefault("qa_view", [])
+    st.session_state.setdefault("qa_msgs", [])
     st.session_state.setdefault("qa_stats", new_stats())
 
     st.title(QA)
@@ -436,7 +438,6 @@ def render_write() -> None:
 
     sig = f"{root}|{allow_self_edit}"
     if st.session_state.get("w_sig") != sig:
-        st.session_state["w_sig"] = sig
         st.session_state["w_msgs"] = [
             {"role": "system", "content": build_repo_system_prompt(root, writable=True, allow_self_edit=allow_self_edit)}
         ]
@@ -446,6 +447,10 @@ def render_write() -> None:
         st.session_state["w_stats"] = new_stats()
         st.session_state.pop("w_go", None)
         st.session_state.pop("w_decision", None)
+        st.session_state["w_sig"] = sig  # set last: a failure above won't mark as ready
+    st.session_state.setdefault("w_view", [])
+    st.session_state.setdefault("w_msgs", [])
+    st.session_state.setdefault("w_queue", [])
     st.session_state.setdefault("w_stats", new_stats())
 
     def _append_tool(call_id: str, content: str) -> None:

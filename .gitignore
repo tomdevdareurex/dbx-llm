@@ -23,3 +23,8 @@ env/
 .vscode/
 .idea/
 .DS_Store
+
+# Streamlit GUI logs
+st_err.log
+st_out.log
+*.st.log
